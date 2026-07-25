@@ -125,3 +125,37 @@ class TestSourceState:
 
     def test_unknown_source_has_no_state(self, store):
         assert store.get_state("never-seen") is None
+
+
+class TestEffectiveAtStability:
+    """排序键必须稳定。它一漂，信息流的顺序和分页就都不可信了。"""
+
+    def test_effective_at_does_not_drift_on_recollect(self, store):
+        """没有发布时间的条目，重抓时排序键不能跟着「现在」往前跑。
+
+        漂了的话，这类条目会永远浮在信息流顶部、永远落在时间窗内，
+        翻页时还会因为排序键中途变化而漏条重条。
+        """
+        store.upsert_items([item(1, at=NOW)])
+        store.upsert_items([item(1, at=NOW + timedelta(hours=2))])
+        (stored,) = store.query_items(limit=10)
+        assert stored.effective_time == NOW
+
+    def test_publish_time_wins_when_present(self, store):
+        published = NOW - timedelta(days=3)
+        it = item(2, at=NOW).model_copy(
+            update={"published_at": published, "time_basis": TimeBasis.PUBLISHED}
+        )
+        store.upsert_items([it])
+        (stored,) = store.query_items(limit=10)
+        assert stored.effective_time == published
+
+    def test_window_query_uses_publish_time(self, store):
+        """发布于三天前的条目，不该出现在「最近 1 小时」里。"""
+        published = NOW - timedelta(days=3)
+        it = item(3, at=NOW).model_copy(
+            update={"published_at": published, "time_basis": TimeBasis.PUBLISHED}
+        )
+        store.upsert_items([it])
+        assert store.query_items(published_after=NOW - timedelta(hours=1), limit=10) == []
+        assert store.query_items(published_after=NOW - timedelta(days=7), limit=10) != []

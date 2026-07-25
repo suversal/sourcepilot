@@ -95,6 +95,12 @@ class Store:
             "CREATE INDEX IF NOT EXISTS idx_items_effective "
             "ON items(effective_at DESC, id DESC)"
         )
+        # 修复历史漂移：曾经的 upsert 会把没有发布时间的条目的 effective_at
+        # 跟着每轮重抓往前推。重算一遍，让它回到首次收录时间。
+        conn.execute(
+            "UPDATE items SET effective_at = COALESCE(published_at, discovered_at) "
+            "WHERE effective_at != COALESCE(published_at, discovered_at)"
+        )
 
     @contextmanager
     def _conn(self):
@@ -141,7 +147,11 @@ class Store:
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title, summary=excluded.summary, url=excluded.url,
                     author=excluded.author, published_at=excluded.published_at,
-                    effective_at=excluded.effective_at,
+                    -- 用库里已存的 discovered_at 兜底，不能用 excluded 的。
+                    -- 重抓时新对象的 discovered_at 是「现在」，跟着它走会让没有
+                    -- 发布时间的条目每采集一轮就往前漂一次——永远浮在信息流顶部、
+                    -- 永远落在时间窗内，翻页时还会因为排序键中途变化而漏条重条。
+                    effective_at=COALESCE(excluded.published_at, items.discovered_at),
                     time_basis=excluded.time_basis, score=excluded.score,
                     categories=excluded.categories, media=excluded.media, raw=excluded.raw
                 """,
