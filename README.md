@@ -19,21 +19,14 @@
 
 ## 状态
 
-REST 出口 + 热榜链路已跑通，X 后端未开始。
+契约已冻结，热榜链路端到端跑通（4 源 / 3 端点），X 后端未开始。
 
-- [x] 工具契约：Item schema、响应信封、错误码、六个工具入参 → [docs/contract.md](docs/contract.md)
-- [x] 声明式源引擎 + hotlist + REST + [SKILL.md](SKILL.md)
-- [ ] X 后端：签名 + 账号池 + 限流状态机
-- [ ] 可靠性层：Canary 自检、故障转移、代理轮换
-- [ ] MCP 出口
-- [ ] 迁入 RSS + 公众号 channel
-
-已上线端点：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/health`。
+已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/health`。
+已接信源：B站排行榜、今日头条热榜、V2EX 最热、掘金后端热榜。
 契约里的 `search_x` / `get_x_timeline` / `get_wechat_feed` / `read_article` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
 
-已接信源：B站排行榜、今日头条热榜、V2EX 最热、掘金后端热榜。
-微博配置在仓库里但默认禁用（需要匿名 cookie，见 [config/sources/weibo.yaml](config/sources/weibo.yaml)）。
+阶段进度、待办与已知问题见 **[docs/progress.md](docs/progress.md)**。
 
 ## 跑起来
 

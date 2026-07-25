@@ -54,16 +54,17 @@ Python 3.12+ / FastAPI / pydantic v2 / SQLite。选 Python 是因为 X 签名（
 - `services.py` 业务判断（降级、缓存、分源健康）· `api.py` REST 壳，只做协议翻译
 - **补 MCP 出口时改 `api.py` 的同级新文件，不许把逻辑抄一份**——服务层才是那「一套核心」。
 
-## 落地顺序（当前进度：第 2 步完成，下一步 X 后端）
+## 落地顺序
 
-1. ~~先定死工具契约（schema/Item/错误码）~~ ✅ v1.0.0 已冻结，见 docs/contract.md。
-2. ~~REST + SKILL.md + 声明式 hotlist 引擎~~ ✅ 已接 B站/头条/V2EX/掘金四源，
-   `/api/v1/hotlist`、`/api/v1/items`、`/api/v1/health` 可用。待办：用 Codex 装 SKILL.md
-   实测「提问→查→中文简报」整链路。
+1. 先定死工具契约（schema/Item/错误码）——唯一合同，先定省返工。
+2. REST + SKILL.md + 声明式 hotlist 引擎，打通「提问→查→中文简报」整链路。
 3. X 后端硬骨头：签名 + 账号池 + 限流状态机（区分临时限流 vs 封号）。简历核心，多打磨。
 4. 可靠性层：Canary 自检、故障转移、代理轮换（接 Clash）。
 5. 补 MCP（换协议壳）。
 6. 迁 AIRADAR 的 RSS 逻辑进来 + 加公众号 channel。
+
+**当前进度、待办、已知问题一律看 @docs/progress.md，并在改动后更新它**——
+进度只记在那一处，别再往本文件或 README 里抄一份。
 
 ## 环境约定
 
