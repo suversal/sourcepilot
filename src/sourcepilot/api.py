@@ -26,11 +26,12 @@ from .contracts import (
     ErrorCode,
     GetFeedParams,
     GetHotlistParams,
+    GetWechatFeedParams,
     ItemsPayload,
     ReadArticleParams,
     SourcePilotError,
 )
-from .services import FeedService, HotlistService
+from .services import FeedService, HotlistService, WechatFeedService
 from .sources import SourceConfig, load_sources
 from .store import Store
 
@@ -51,6 +52,7 @@ def create_app(
     hotlist = HotlistService(collector)
     feed = FeedService(store)
     article = ArticleService()
+    wechat = WechatFeedService(store)
     background = Scheduler(collector)
 
     @asynccontextmanager
@@ -107,6 +109,8 @@ def create_app(
             "endpoints": [
                 f"{API_PREFIX}/hotlist",
                 f"{API_PREFIX}/items",
+                f"{API_PREFIX}/wechat/feed",
+                f"{API_PREFIX}/article",
                 f"{API_PREFIX}/health",
             ],
         }
@@ -160,6 +164,13 @@ def create_app(
         q 关键词检索、platform 按信源过滤、since 做增量、cursor 做分页，可组合。
         """
         return feed.get(params)
+
+    @app.get(f"{API_PREFIX}/wechat/feed", tags=["tools"], summary="get_wechat_feed")
+    async def get_wechat_feed(
+        params: Annotated[GetWechatFeedParams, Query()],
+    ) -> Envelope[ItemsPayload]:
+        """订阅公众号的最新文章（缓存）。未配置凭据时该 channel 不采集，这里返回空。"""
+        return wechat.get(params)
 
     @app.get(f"{API_PREFIX}/article", tags=["tools"], summary="read_article")
     async def read_article(

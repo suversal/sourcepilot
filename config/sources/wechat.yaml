@@ -1,0 +1,29 @@
+# 公众号 channel。默认禁用——它必须有登录凭据才能工作。
+#
+# 为什么不能匿名：mp.weixin.qq.com 的 searchbiz 与 appmsgpublish 两个接口，
+# 不带登录态一律返回 {"ret":200003,"err_msg":"invalid session"}（实测 2026-07-26）。
+#
+# 怎么启用：
+#   1. python -m sourcepilot.channels.login   → 会存一张二维码图片并打印路径
+#   2. 用**专用微信小号**扫码（别用主号，这条线风险最高）
+#   3. 命令自动把凭据写进 config/wechat_credentials.yaml（已在 .gitignore 里）
+#   4. 把下面 enabled 改成 true，填上要订阅的公众号名
+#
+# 这块是全平台最可能被官方封的一条线，所以整块隔离在 channels/wechat.py，
+# 坏了整块换掉，不牵动其它信源。
+name: wechat
+display_name: 微信公众号
+type: wechat
+platform: wechat
+enabled: false
+channel: wechat
+min_interval: 3600
+lang: zh
+
+# 每个账号取多少条，以及账号之间的请求间隔（公众平台对连续请求很敏感）
+per_account_limit: 10
+account_interval: 3.0
+
+accounts: []
+  # - 量子位
+  # - 机器之心

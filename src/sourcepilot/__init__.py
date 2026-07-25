@@ -3,6 +3,7 @@
 职责只有「看见 · 抓取 · 归一化」。排序、LLM 分析、面向用户的推送是下游的事。
 """
 
+from . import channels as _channels  # noqa: F401  注册重逻辑 channel
 from .contracts.version import CONTRACT_VERSION
 
 __version__ = "0.1.0"

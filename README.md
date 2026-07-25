@@ -21,9 +21,13 @@
 
 契约 v1.1.0，采集链路端到端跑通（22 源 / 3 端点，含后台定时采集），X 后端未开始。
 
-已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/health`。
-契约里的 `search_x` / `get_x_timeline` / `get_wechat_feed` / `read_article` 尚未实现，
+已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/article`、
+`GET /api/v1/wechat/feed`、`GET /api/v1/health`。
+契约里的 `search_x` / `get_x_timeline` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
+
+公众号 channel 已建好但默认禁用：它必须有登录态才能工作，扫码授权只能由你本人完成
+（`python -m sourcepilot.channels.login`，建议用专用小号）。
 
 已接信源 22 个，分两类：
 

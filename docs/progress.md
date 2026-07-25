@@ -27,7 +27,7 @@
 | 3 | X 后端（签名/账号池/限流） | ⬜ 未开始 | — | — |
 | 4 | 可靠性层（Canary/故障转移/代理） | ⬜ 未开始 | — | — |
 | 5 | MCP 出口 | ⬜ 未开始 | — | — |
-| 6 | 迁 RSS + 公众号 channel | ⬜ 未开始 | — | — |
+| 6 | 迁 RSS + 公众号 channel | 🔶 部分完成 | RSS 提取器（第 2 步顺带做了）、公众号 channel 全链路 | 14 项离线测试；**真实采集未验证**——需要使用者自己扫码授权 |
 
 第 2 步标 ⚠️ 而非 ✅ 的原因：**SKILL.md 从未在真实 Agent 上跑过**，
 「提问→查→中文简报」整条链路还只是纸面设计。见下方待办 T1。
@@ -38,6 +38,7 @@
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
 - `GET /api/v1/article` — 读单篇正文转 Markdown（现查，带 SSRF 防护）
+- `GET /api/v1/wechat/feed` — 订阅公众号最新文章（缓存，需自行扫码授权）
 
 已接信源 22 个，分两类：
 
@@ -59,7 +60,7 @@
 
 ### 契约里定义但尚未实现
 
-`search_x` · `get_x_timeline` · `get_wechat_feed`
+`search_x` · `get_x_timeline`
 
 **刻意不给占位端点**——没接的能力就是访问不到，不返回假数据。
 SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
@@ -99,6 +100,8 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 关键词分类误标率高 | 开着时 1737 条里 model 命中 1251、product 1203，几乎等于没过滤。子串匹配让「ChatGPT」命中 `model`，匹配摘要让 RSS 随口一提就中标 | **默认关闭**，只保留主题单一信源的源级映射（model 1251→75）。空数组是诚实的，错标签会误导 AIRADAR 的筛选 |
 | AIHOT 是二手聚合源 | 全仓库唯一一个吃「别人聚合结果」的源，其余 23 个都直连平台自己的接口 | 已在配置文件头标注。它挂了我们查不出根因，且内容可能与自接的一手源重复——跨源去重做出来后要留意 |
 | 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
+| 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | channel 已建好并默认禁用。扫码那步只能由使用者本人完成（`python -m sourcepilot.channels.login`），凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
+| 公众号是最易被封的一条线 | 走的是公众平台后台接口，不是官方开放 API | 整块隔离在 `channels/wechat.py`，坏了整块换。账号之间留 3 秒间隔，凭据失效立刻停手不继续捅 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
 ---

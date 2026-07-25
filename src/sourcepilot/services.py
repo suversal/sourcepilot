@@ -15,6 +15,7 @@ from .contracts import (
     Envelope,
     GetFeedParams,
     GetHotlistParams,
+    GetWechatFeedParams,
     ItemsPayload,
     Meta,
     Mode,
@@ -114,6 +115,44 @@ class FeedService:
             category=params.category,
             q=params.q,
             since=params.since,
+            published_after=window_start,
+            limit=params.limit + 1,
+            cursor=params.cursor,
+        )
+        has_more = len(rows) > params.limit
+        items = rows[: params.limit]
+
+        meta = Meta(
+            mode=Mode.CACHE,
+            stale=False,
+            collected_at=max((i.discovered_at for i in items), default=None),
+            next_cursor=encode_cursor(items[-1]) if items and has_more else None,
+            has_more=has_more,
+            elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return Envelope[ItemsPayload].success(ItemsPayload(items=items), meta)
+
+
+class WechatFeedService:
+    """`get_wechat_feed`：订阅公众号的最新文章（缓存）。
+
+    与信息流走同一个库、同一套分页——公众号只是 source_type 不同，
+    没必要为它单开一条查询路径。
+    """
+
+    def __init__(self, store: Store) -> None:
+        self.store = store
+
+    def get(self, params: GetWechatFeedParams) -> Envelope[ItemsPayload]:
+        started = time.perf_counter()
+        span = WINDOW_SECONDS[params.window]
+        window_start = (
+            None if span is None else datetime.now(UTC) - timedelta(seconds=span)
+        )
+
+        rows = self.store.query_items(
+            source_type=SourceType.WECHAT,
+            platforms=[params.account] if params.account else None,
             published_after=window_start,
             limit=params.limit + 1,
             cursor=params.cursor,

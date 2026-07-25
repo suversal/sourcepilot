@@ -165,6 +165,14 @@ class SourceConfig(BaseModel):
     categories: list[str] = Field(
         default_factory=list, description="源级分类，无条件打在该源所有条目上"
     )
+    channel: str | None = Field(
+        default=None,
+        description=(
+            "改用重逻辑 channel 而不是声明式引擎（如 wechat、x）。"
+            "声明式配置搞不定的源——需要登录态、签名、账号池的——单独写 Python，"
+            "但仍走同一套调度、状态记录与降级路径，不另起一套。"
+        ),
+    )
     ranked: bool = Field(
         default=False,
         description=(
@@ -173,6 +181,18 @@ class SourceConfig(BaseModel):
             "默认 false——按时间倒序的 RSS/快讯没有名次可言，硬套排名等于把"
             "「第几个被列出来」伪装成「有多热」。"
         ),
+    )
+    accounts: list[str] = Field(
+        default_factory=list,
+        description="channel 专用：要订阅的账号名列表（公众号 channel 用）",
+    )
+    per_account_limit: int = Field(
+        default=10, ge=1, le=50, description="channel 专用：每个账号取多少条"
+    )
+    account_interval: float = Field(
+        default=3.0,
+        ge=0,
+        description="channel 专用：账号之间的请求间隔（秒）。公众平台对连续请求很敏感",
     )
     verify_urls: bool = Field(
         default=False,
@@ -184,8 +204,14 @@ class SourceConfig(BaseModel):
         ),
     )
     pre_request: PreRequestSpec | None = None
-    request: RequestSpec
-    extract: ExtractSpec
+    request: RequestSpec | None = None
+    extract: ExtractSpec | None = None
+
+    @model_validator(mode="after")
+    def _need_backend(self) -> SourceConfig:
+        if self.channel is None and (self.request is None or self.extract is None):
+            raise ValueError("声明式源必须给 request 与 extract；重逻辑源用 channel 指定")
+        return self
 
     @model_validator(mode="after")
     def _default_platform(self) -> SourceConfig:

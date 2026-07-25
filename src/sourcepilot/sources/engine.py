@@ -343,7 +343,21 @@ def verify_urls(
     return alive
 
 
+#: 重逻辑 channel 注册表。声明式引擎搞不定的源在这里登记自己的采集函数。
+CHANNELS: dict[str, Any] = {}
+
+
+def register_channel(name: str, collector) -> None:
+    CHANNELS[name] = collector
+
+
 def collect(config: SourceConfig, client: httpx.Client | None = None) -> list[Item]:
+    if config.channel is not None:
+        handler = CHANNELS.get(config.channel)
+        if handler is None:
+            raise UpstreamDown(f"未注册的 channel：{config.channel}")
+        return handler(config)
+
     items = normalize(config, fetch_raw(config, client))
     if config.verify_urls:
         items = verify_urls(config, items, client)
