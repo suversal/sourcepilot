@@ -271,7 +271,7 @@ def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None
                     time_basis=(
                         TimeBasis.PUBLISHED if published_at else TimeBasis.DISCOVERED
                     ),
-                    score=rank_to_score(rank, total),
+                    score=rank_to_score(rank, total) if config.ranked else 0.0,
                     categories=categories,
                     lang=config.lang,
                     media=media,
@@ -290,6 +290,8 @@ def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None
 def rank_to_score(rank: int, total: int) -> float:
     """榜内排名 → [0,1] 源内相对热度。第 1 名 1.0，末位 > 0。
 
+    只对真正是排行榜的源有意义（config.ranked）。按时间倒序的 RSS/快讯
+    没有名次，那种源固定 0.0，原始热度值仍在 raw 里。
     契约明确：该值不保证跨源可比。
     """
     if total <= 0:

@@ -37,6 +37,7 @@ FAKE_CONFIG_DICT = {
     "type": "hotlist",
     "platform": "fake",
     "min_interval": 300,
+    "ranked": True,
     "lang": "zh",
     "request": {"url": "https://example.com/api"},
     "extract": {

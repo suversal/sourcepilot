@@ -1,29 +1,43 @@
-# 分类规则表（确定性打标，不走 LLM）。契约见 docs/contract.md §2。
+# 分类规则表。契约见 docs/contract.md §2。
 #
-# 两级规则，命中即打标，允许多标签：
-#   source_rules   — 某些源天然属于某类
-#   keyword_rules  — 标题 + 摘要命中关键词/正则
-# 全不命中则 categories 为空数组（表示「规则没命中」，不代表「不属于任何类」）。
+# ── 为什么关键词规则默认关掉 ──────────────────────────────
+# 2026-07-25 实测：开着的时候 1737 条里 model 命中 1251 条、product 1203 条，
+# 几乎等于没过滤。噪音来自两处：
+#   1. 子串匹配太松——「ChatGPT」含「GPT」就被判成 model，于是
+#      「Launching Health in ChatGPT」这种产品公告被打上模型标签。
+#   2. 匹配范围含摘要——RSS 摘要里随便提一句 GPT，整条就被带跑。
+# 关掉之后 model 从 1251 降到 75（只剩源级映射），空标签占多数。
+#
+# **空数组是诚实的，错标签是有害的**：契约里 categories 定位成「过滤辅助」，
+# AIRADAR 会拿它筛内容，喂错标签比不给标签更糟。
+#
+# 更根本的理由：准确的主题分类需要语义理解，而铁律禁止采集侧做 LLM 分析。
+# 「用户关心什么」本来就是 AIRADAR 的职责（它已有筛选打分逻辑），和排序同理。
+#
+# 要重新启用，把 keyword_rules_enabled 改成 true，但先想清楚怎么解决上面两点
+# （至少要做词边界匹配，并且只匹配标题不匹配摘要）。
 
 version: 1
+keyword_rules_enabled: false
 
 source_rules:
-  # source.type 或 source.platform → 分类
-  # arxiv: [paper]
+  # source.type / source.platform → 分类。
+  # 只给主题确实单一的源用；综合性信源（OpenAI 官网、36氪、HN 这种什么都发的）
+  # 一律不配——无条件打标等于编造。当前在各源 YAML 的 categories 字段里配置。
 
 keyword_rules:
   model:
-    keywords: [GPT, Claude, Gemini, Llama, 大模型, 开源模型, 参数量, 微调, 蒸馏]
+    keywords: [大模型, 开源模型, 参数量, 微调, 蒸馏]
     patterns: ['(?i)\b(LLM|SOTA|MoE)\b']
   product:
-    keywords: [发布, 上线, 内测, 公测, 新功能, 定价, API 开放]
+    keywords: [内测, 公测, 新功能, API 开放]
     patterns: []
   paper:
     keywords: [论文, 预印本, arXiv, 综述]
     patterns: ['(?i)\barxiv\.org\b']
   industry:
-    keywords: [融资, 收购, 估值, 裁员, 监管, 合规, 芯片, 算力]
+    keywords: [融资, 收购, 估值, 裁员, 监管, 合规]
     patterns: []
   tip:
-    keywords: [教程, 实践, 技巧, 踩坑, 最佳实践, 提示词]
+    keywords: [教程, 实践, 踩坑, 最佳实践, 提示词]
     patterns: []

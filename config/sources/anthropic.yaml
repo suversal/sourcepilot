@@ -9,7 +9,6 @@ enabled: true
 min_interval: 900
 lang: en
 base_url: https://www.anthropic.com
-categories: [model, product]
 
 request:
   url: https://www.anthropic.com/news

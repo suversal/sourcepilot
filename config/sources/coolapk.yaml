@@ -6,6 +6,7 @@ display_name: 酷安今日热门
 type: hotlist
 platform: coolapk
 enabled: false
+ranked: true
 min_interval: 600
 lang: zh
 

@@ -4,6 +4,7 @@ display_name: 掘金后端热榜
 type: hotlist
 platform: juejin
 enabled: true
+ranked: true
 min_interval: 900
 lang: zh
 

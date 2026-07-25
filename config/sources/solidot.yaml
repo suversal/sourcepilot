@@ -6,7 +6,6 @@ platform: solidot
 enabled: true
 min_interval: 900
 lang: zh
-categories: [industry]
 
 request:
   url: https://www.solidot.org/index.rss

@@ -3,6 +3,7 @@ display_name: B站全站排行榜
 type: hotlist
 platform: bilibili
 enabled: true
+ranked: true
 min_interval: 600
 lang: zh
 

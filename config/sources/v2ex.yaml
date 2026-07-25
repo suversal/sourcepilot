@@ -4,9 +4,9 @@ display_name: V2EX 最热主题
 type: hotlist
 platform: v2ex
 enabled: true
+ranked: true
 min_interval: 600
 lang: zh
-categories: [tip]
 
 request:
   url: https://www.v2ex.com/api/topics/hot.json

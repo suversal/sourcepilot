@@ -96,12 +96,28 @@ class TestNormalize:
         items = normalize(fake_config, FAKE_PAYLOAD)
         assert items[0].score > items[1].score
 
+    def test_unranked_source_gets_zero_score(self):
+        """契约 §2：没有热度信号的源固定 0.0。
+
+        按时间倒序的 RSS/快讯没有名次可言，硬套排名等于把「第几个被列出来」
+        伪装成「有多热」，下游会当真。
+        """
+        cfg = SourceConfig(**{**FAKE_CONFIG_DICT, "ranked": False})
+        items = normalize(cfg, FAKE_PAYLOAD)
+        assert [i.score for i in items] == [0.0, 0.0]
+
+    def test_unranked_source_still_keeps_raw_signal(self):
+        """score 归零不等于把原始热度扔掉——下游想自己加权还得取得到。"""
+        cfg = SourceConfig(**{**FAKE_CONFIG_DICT, "ranked": False})
+        assert normalize(cfg, FAKE_PAYLOAD)[0].raw["score_raw"] == 5000
+
     def test_raw_keeps_original_hotness(self, fake_config):
         """契约 §2：原始热度值留在 raw 里，给下游自行加权。"""
         assert normalize(fake_config, FAKE_PAYLOAD)[0].raw == {"rank": 1, "score_raw": 5000}
 
-    def test_keyword_categories_applied(self, fake_config):
-        assert Category.MODEL in normalize(fake_config, FAKE_PAYLOAD)[0].categories
+    def test_keyword_categories_off_by_default(self, fake_config):
+        """关键词分类默认关闭——错标签比空标签更有害，理由见 config/categories.yaml。"""
+        assert normalize(fake_config, FAKE_PAYLOAD)[0].categories == []
 
     def test_source_level_categories_applied(self):
         cfg = SourceConfig(**{**FAKE_CONFIG_DICT, "categories": ["tip"]})
@@ -162,3 +178,28 @@ class TestShippedConfigs:
     def test_platforms_are_unique(self):
         platforms = [c.platform for c in load_sources(SOURCES_DIR).values()]
         assert len(platforms) == len(set(platforms))
+
+
+class TestCategorizer:
+    """分类只做确定性打标，且宁可不标也不错标。"""
+
+    def test_keyword_rules_off_by_default(self, tmp_path):
+        from sourcepilot.categorize import Categorizer
+
+        c = Categorizer({"keyword_rules": {"model": {"keywords": ["gpt"]}}})
+        assert c.classify(title="Launching Health in ChatGPT") == []
+
+    def test_keyword_rules_apply_when_enabled(self):
+        from sourcepilot.categorize import Categorizer
+
+        c = Categorizer(
+            {"keyword_rules_enabled": True, "keyword_rules": {"model": {"keywords": ["大模型"]}}}
+        )
+        assert [x.value for x in c.classify(title="某公司发布新大模型")] == ["model"]
+
+    def test_source_rules_always_apply(self):
+        """源级映射不受开关影响——那是「这个源只发这类内容」的事实，不是猜测。"""
+        from sourcepilot.categorize import Categorizer
+
+        c = Categorizer({"source_rules": {"arxiv": ["paper"]}})
+        assert [x.value for x in c.classify(title="随便什么", source_keys=("arxiv",))] == ["paper"]

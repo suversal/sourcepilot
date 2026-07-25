@@ -1,20 +1,25 @@
+# 走 HN 官方的 Algolia API 而不是抓首页 HTML。
+# 首页 HTML 里作者、时间、points 都在**兄弟行**（tr.athing 之后那一行），
+# 按行选中标题行就够不着它们；这个 API 一次给全，还是结构化的。
 name: hackernews
 display_name: Hacker News
 type: hotlist
 platform: hackernews
 enabled: true
+ranked: true
 min_interval: 600
 lang: en
-base_url: https://news.ycombinator.com/
-categories: [industry]
 
 request:
-  url: https://news.ycombinator.com/
+  url: https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30
 
 extract:
-  format: html
-  list: .athing
+  format: json
+  list: hits
   fields:
-    native_id: { select: ".", attr: id }
-    title: { select: ".titleline a" }
-    url: { template: "{base_url}item?id={native_id}" }
+    native_id: objectID
+    title: title
+    url: { template: "https://news.ycombinator.com/item?id={objectID}" }
+    author: author
+    published_at: { path: created_at, type: iso }
+    score_raw: { path: points, type: int }

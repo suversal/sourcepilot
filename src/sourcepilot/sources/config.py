@@ -165,6 +165,15 @@ class SourceConfig(BaseModel):
     categories: list[str] = Field(
         default_factory=list, description="源级分类，无条件打在该源所有条目上"
     )
+    ranked: bool = Field(
+        default=False,
+        description=(
+            "这个源本身是不是一份排行榜。只有 true 时 score 才由榜内位置换算；"
+            "否则固定 0.0（契约 §2：无热度信号的源不许编一个热度出来）。"
+            "默认 false——按时间倒序的 RSS/快讯没有名次可言，硬套排名等于把"
+            "「第几个被列出来」伪装成「有多热」。"
+        ),
+    )
     verify_urls: bool = Field(
         default=False,
         description=(

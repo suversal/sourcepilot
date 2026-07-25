@@ -3,6 +3,7 @@ display_name: 今日头条热榜
 type: hotlist
 platform: toutiao
 enabled: true
+ranked: true
 min_interval: 300
 lang: zh
 

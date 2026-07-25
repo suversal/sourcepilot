@@ -5,7 +5,6 @@ platform: googleai
 enabled: true
 min_interval: 1800
 lang: en
-categories: [model, product]
 
 request:
   url: https://blog.google/technology/ai/rss/

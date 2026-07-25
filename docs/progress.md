@@ -95,7 +95,8 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 字节 Seed 页面里没有文章链接 | 卡片是 `div` 不是 `<a>`，跳转由 JS 处理；渲染完 DOM 里也依然没有 href。但**卡片内容本身是服务端渲染的**（外层 `display:none`），标题/日期/分类静态就能拿到 | 文章地址 = 标题 slug 化（9 条全量验证 9/9 命中）。因为这是对站点的假设，开 `verify_urls` 逐条校验兜底。**没有用浏览器自动化** |
 | 智谱官网也是客户端渲染 | `zhipuai.cn/news` 抓不到条目 | 改抓开放平台文档站的「新品发布」页，每条公告的 `div.update` id 就是发布日期 |
 | Anthropic 类名是构建期哈希 | `FeaturedGrid-module-scss-module__W1FydW__title` 这种，改版必变 | 选择器只依赖 href 前缀、标签结构和 `[class*="title"]` 后缀 |
-| 分类规则表很稀 | `source_rules` 为空，关键词表只有 v1 词条 | `categories` 命中率低，下游只能当过滤辅助用 |
+| 关键词分类误标率高 | 开着时 1737 条里 model 命中 1251、product 1203，几乎等于没过滤。子串匹配让「ChatGPT」命中 `model`，匹配摘要让 RSS 随口一提就中标 | **默认关闭**，只保留主题单一信源的源级映射（model 1251→75）。空数组是诚实的，错标签会误导 AIRADAR 的筛选 |
+| 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
 ---

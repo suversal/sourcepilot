@@ -7,9 +7,9 @@ display_name: LINUX DO 今日热门
 type: hotlist
 platform: linuxdo
 enabled: true
+ranked: true
 min_interval: 600
 lang: zh
-categories: [tip]
 
 request:
   url: https://linux.do/top/daily.json

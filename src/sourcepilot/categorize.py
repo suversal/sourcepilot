@@ -18,6 +18,9 @@ from .settings import CATEGORIES_FILE
 
 class Categorizer:
     def __init__(self, rules: dict) -> None:
+        # 关键词规则默认关闭，原因写在 config/categories.yaml 顶部：
+        # 子串匹配 + 匹配摘要会大量误标，错标签比空标签更有害。
+        self._keywords_on: bool = bool(rules.get("keyword_rules_enabled", False))
         self._source_rules: dict[str, list[Category]] = {
             key: [Category(c) for c in value]
             for key, value in (rules.get("source_rules") or {}).items()
@@ -44,6 +47,9 @@ class Categorizer:
         for key in source_keys:
             if key and key in self._source_rules:
                 hits.extend(self._source_rules[key])
+
+        if not self._keywords_on:
+            return list(dict.fromkeys(hits))
 
         haystack = f"{title} {summary or ''}"
         lowered = haystack.lower()

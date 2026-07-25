@@ -3,9 +3,9 @@ display_name: 少数派热门文章
 type: hotlist
 platform: sspai
 enabled: true
+ranked: true
 min_interval: 900
 lang: zh
-categories: [tip]
 
 request:
   # tag=热门文章（URL 编码后即 %E7%83%AD%E9%97%A8%E6%96%87%E7%AB%A0）

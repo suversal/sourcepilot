@@ -16,6 +16,9 @@ extract:
     native_id: { select: "a.t", attr: href }
     title: { select: "a.t" }
     url: { select: "a.t", attr: href }
+    # a.c 的 data-ot 是带时区的完整 ISO（2026-07-25T23:11:17.257+08:00），
+    # 比 <i> 里那个不带时区的字符串可靠——后者会被当成 UTC，差 8 小时。
+    published_at: { select: "a.c", attr: data-ot, type: iso }
   # 列表里混着推广位，newsnow 也是靠关键词剔的。
   exclude_if:
     title: [神券, 优惠, 补贴, 京东]

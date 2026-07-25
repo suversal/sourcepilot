@@ -8,7 +8,6 @@ platform: zhipu
 enabled: true
 min_interval: 1800
 lang: zh
-categories: [model, product]
 
 request:
   url: https://docs.bigmodel.cn/cn/update/new-releases

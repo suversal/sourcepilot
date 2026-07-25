@@ -3,6 +3,7 @@ display_name: GitHub Trending
 type: hotlist
 platform: github
 enabled: true
+ranked: true
 min_interval: 1800
 lang: en
 base_url: https://github.com

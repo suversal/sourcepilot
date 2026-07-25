@@ -7,7 +7,6 @@ platform: aihot
 enabled: true
 min_interval: 600
 lang: zh
-categories: [model]
 
 request:
   url: https://aihot.virxact.com/api/public/items?mode=all&take=30

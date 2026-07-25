@@ -6,7 +6,6 @@ enabled: true
 min_interval: 300
 lang: zh
 base_url: https://www.36kr.com
-categories: [industry]
 
 request:
   url: https://www.36kr.com/newsflashes
