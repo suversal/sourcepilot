@@ -96,6 +96,7 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 智谱官网也是客户端渲染 | `zhipuai.cn/news` 抓不到条目 | 改抓开放平台文档站的「新品发布」页，每条公告的 `div.update` id 就是发布日期 |
 | Anthropic 类名是构建期哈希 | `FeaturedGrid-module-scss-module__W1FydW__title` 这种，改版必变 | 选择器只依赖 href 前缀、标签结构和 `[class*="title"]` 后缀 |
 | 关键词分类误标率高 | 开着时 1737 条里 model 命中 1251、product 1203，几乎等于没过滤。子串匹配让「ChatGPT」命中 `model`，匹配摘要让 RSS 随口一提就中标 | **默认关闭**，只保留主题单一信源的源级映射（model 1251→75）。空数组是诚实的，错标签会误导 AIRADAR 的筛选 |
+| AIHOT 是二手聚合源 | 全仓库唯一一个吃「别人聚合结果」的源，其余 23 个都直连平台自己的接口 | 已在配置文件头标注。它挂了我们查不出根因，且内容可能与自接的一手源重复——跨源去重做出来后要留意 |
 | 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
