@@ -1,0 +1,29 @@
+# 注意：这是模型目录，不是新闻流。
+# seed.bytedance.com/en/blog 的文章列表是客户端渲染的，静态请求拿不到（实测
+# 整页 0 个 /blog/ 链接）。导航里的模型页是服务端渲染的，能稳定拿到——
+# Seedance / Seedream / Seed2.1 等发布都在其中，但没有发布时间，
+# 条目集合也基本不变。要拿到真正的博客流得上浏览器自动化，那是后话。
+name: bytedance-seed
+display_name: 字节 Seed 模型发布
+type: vendor
+platform: bytedance-seed
+enabled: true
+min_interval: 3600
+lang: en
+base_url: https://seed.bytedance.com
+categories: [model]
+
+request:
+  url: https://seed.bytedance.com/en/models
+
+extract:
+  format: html
+  list: 'a[href^="/en/"]'
+  fields:
+    native_id: { select: ".", attr: href }
+    title: { select: "." }
+    url: { select: ".", attr: href }
+  exclude_if:
+    # 导航里混着栏目入口和招聘页，不是模型发布。
+    title: [Blog, Models, Research, Career, Seed Edge, Fellows, Recruitment, View All, Learn More]
+    url: [public_papers, career, seedstem, seedearlycareer]

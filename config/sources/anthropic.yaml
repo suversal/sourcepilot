@@ -1,0 +1,26 @@
+# 官网没有 RSS（/rss.xml、/feed.xml、/news/feed 全 404，页面里也没声明 feed），
+# 只能抓 /news 列表页。类名是构建期哈希（FeaturedGrid-module-scss-module__…），
+# 改版必变，所以选择器只依赖 href 前缀和标签结构。
+name: anthropic
+display_name: Anthropic 官方新闻
+type: vendor
+platform: anthropic
+enabled: true
+min_interval: 900
+lang: en
+base_url: https://www.anthropic.com
+categories: [model, product]
+
+request:
+  url: https://www.anthropic.com/news
+
+extract:
+  format: html
+  list: 'a[href^="/news/"]'
+  fields:
+    native_id: { select: ".", attr: href }
+    # 精选卡片用 h2/h4，列表卡片的标题在 span 上；类名哈希会变，但 __title 后缀稳定。
+    title: { select: 'h2, h4, [class*="title"]' }
+    url: { select: ".", attr: href }
+    summary: { select: "p" }
+    published_at: { select: "time", type: strptime, format: "%b %d, %Y" }

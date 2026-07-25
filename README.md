@@ -19,21 +19,26 @@
 
 ## 状态
 
-契约已冻结，热榜链路端到端跑通（14 源 / 3 端点），X 后端未开始。
+契约 v1.1.0，采集链路端到端跑通（22 源 / 3 端点，含后台定时采集），X 后端未开始。
 
 已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/health`。
 契约里的 `search_x` / `get_x_timeline` / `get_wechat_feed` / `read_article` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
 
-已接信源（14 个，含 newsnow 科技分类全量）：
+已接信源 22 个，分两类：
 
-| 格式 | 信源 |
-|---|---|
-| JSON | B站排行榜 · 今日头条 · V2EX · 掘金 · 少数派 · LINUX DO · AIHOT |
-| HTML | 36氪快讯 · GitHub Trending · Hacker News · IT之家 |
-| RSS | Solidot · Product Hunt · 远景论坛 |
+**厂商官方发布**（`source=vendor`，一手信息）——
+OpenAI · Anthropic · DeepSeek · 智谱 GLM · Kimi · 通义千问 · 字节 Seed · Google AI
+
+**平台热榜**（`source=hotlist`，newsnow 科技分类全量）——
+B站 · 今日头条 · V2EX · 掘金 · 少数派 · LINUX DO · AIHOT · 36氪 · GitHub Trending ·
+Hacker News · IT之家 · Solidot · Product Hunt · 远景论坛
 
 未启用：微博（需匿名 cookie）、酷安（需签名请求头）——配置在仓库里，禁用理由写在各自文件头。
+
+```bash
+curl -s "http://127.0.0.1:8000/api/v1/items?source=vendor&window=30d&limit=10" | python3 -m json.tool
+```
 
 阶段进度、待办与已知问题见 **[docs/progress.md](docs/progress.md)**。
 

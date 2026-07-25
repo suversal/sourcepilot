@@ -8,52 +8,19 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 
-import httpx
-
+from .collector import Collector, Outcome
 from .contracts import (
     WINDOW_SECONDS,
     BadRequest,
     Envelope,
     GetFeedParams,
     GetHotlistParams,
-    Item,
     ItemsPayload,
     Meta,
     Mode,
-    SourceHealth,
-    SourcePilotError,
+    SourceType,
 )
-from .sources import SourceConfig, collect, load_sources
 from .store import Store, encode_cursor
-
-
-class Platform:
-    """一次热榜刷新的结果，够填 meta.sources 就行。"""
-
-    __slots__ = ("name", "items", "error", "from_cache", "collected_at")
-
-    def __init__(
-        self,
-        name: str,
-        items: list[Item],
-        error: SourcePilotError | None,
-        from_cache: bool,
-        collected_at: datetime | None,
-    ) -> None:
-        self.name = name
-        self.items = items
-        self.error = error
-        self.from_cache = from_cache
-        self.collected_at = collected_at
-
-    def to_health(self) -> SourceHealth:
-        return SourceHealth(
-            name=self.name,
-            ok=self.error is None or bool(self.items),
-            from_cache=self.from_cache,
-            item_count=len(self.items),
-            error_code=self.error.code if self.error else None,
-        )
 
 
 class HotlistService:
@@ -64,12 +31,13 @@ class HotlistService:
     新鲜度的依据。
     """
 
-    def __init__(self, store: Store, sources: dict[str, SourceConfig] | None = None) -> None:
-        self.store = store
-        self.sources = sources if sources is not None else load_sources()
+    def __init__(self, collector: Collector) -> None:
+        self.collector = collector
+        self.store: Store = collector.store
 
-    def enabled_sources(self, platform: str | None) -> list[SourceConfig]:
-        configs = [c for c in self.sources.values() if c.enabled]
+    def _configs(self, platform: str | None):
+        """只认 hotlist 类型的源——厂商发布那类走 /items，不该混进热榜。"""
+        configs = self.collector.enabled(types=[SourceType.HOTLIST])
         if platform is None:
             return configs
         picked = [c for c in configs if c.platform == platform or c.name == platform]
@@ -78,83 +46,57 @@ class HotlistService:
             raise BadRequest(f"未知平台 {platform!r}，可用：{', '.join(known)}")
         return picked
 
-    def _needs_refresh(self, config: SourceConfig, now: datetime) -> bool:
-        state = self.store.get_state(config.name)
-        if state is None or state["last_success_at"] is None:
-            return True
-        return now - state["last_success_at"] >= timedelta(seconds=config.min_interval)
-
-    def _refresh(self, config: SourceConfig, now: datetime, client: httpx.Client) -> Platform:
-        try:
-            items = collect(config, client)
-            self.store.upsert_items(items)
-            self.store.record_success(config.name, len(items), now)
-            return Platform(config.name, items, None, from_cache=False, collected_at=now)
-        except SourcePilotError as exc:
-            self.store.record_failure(config.name, exc.code, now)
-            return Platform(config.name, [], exc, from_cache=True, collected_at=None)
-
-    def _from_cache(self, config: SourceConfig, limit: int) -> list[Item]:
-        return self.store.query_items(
-            platforms=[config.platform or config.name],
-            limit=limit,
-            order_by_score=True,
-        )
-
     def get(self, params: GetHotlistParams) -> Envelope[ItemsPayload]:
         started = time.perf_counter()
         now = datetime.now(UTC)
-        configs = self.enabled_sources(params.platform)
+        configs = self._configs(params.platform)
 
-        results: list[Platform] = []
-        with httpx.Client(follow_redirects=True) as client:
-            for config in configs:
-                if self._needs_refresh(config, now):
-                    result = self._refresh(config, now, client)
-                else:
-                    state = self.store.get_state(config.name)
-                    result = Platform(
-                        config.name,
-                        [],
-                        None,
-                        from_cache=True,
-                        collected_at=state["last_success_at"] if state else None,
-                    )
-                # 无论现抓还是读缓存，都统一从库里取——保证排序和截断口径一致。
-                cached = self._from_cache(config, params.limit)
-                if result.error is not None and cached:
-                    # 刷新该做而没做成，但库里还有旧数据：这就是降级。
-                    state = self.store.get_state(config.name)
-                    result.collected_at = state["last_success_at"] if state else None
-                result.items = cached
-                results.append(result)
+        outcomes: list[Outcome] = []
+        for config in configs:
+            if self.collector.is_due(config, now):
+                outcome = self.collector.refresh(config, now)
+            else:
+                outcome = Outcome(
+                    config.name, collected_at=self.collector.last_success(config.name)
+                )
+            # 无论现抓还是读缓存，都统一从库里取——保证排序和截断口径一致。
+            outcome.items = self.store.query_items(
+                platforms=[config.platform or config.name],
+                limit=params.limit,
+                order_by_score=True,
+            )
+            outcomes.append(outcome)
 
         items = sorted(
-            (i for r in results for i in r.items),
+            (i for o in outcomes for i in o.items),
             key=lambda i: (i.score, i.discovered_at),
             reverse=True,
         )
-
-        stamps = [r.collected_at for r in results if r.collected_at is not None]
-        degraded = any(r.error is not None and r.items for r in results)
-        all_failed = bool(results) and all(r.error is not None and not r.items for r in results)
+        stamps = [o.collected_at for o in outcomes if o.collected_at is not None]
+        all_failed = bool(outcomes) and all(
+            o.error is not None and not o.items for o in outcomes
+        )
 
         meta = Meta(
             mode=Mode.CACHE,
-            stale=degraded,
+            stale=any(o.degraded for o in outcomes),
             collected_at=min(stamps) if stamps else None,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
-            sources=[r.to_health() for r in results],
+            sources=[o.to_health() for o in outcomes],
         )
 
         if all_failed:
-            first = next(r.error for r in results if r.error is not None)
+            first = next(o.error for o in outcomes if o.error is not None)
             return Envelope[ItemsPayload].failure(first.code, first.message, meta)
         return Envelope[ItemsPayload].success(ItemsPayload(items=items), meta)
 
 
 class FeedService:
-    """`get_feed`：喂 AIRADAR 的归一化信息流。纯缓存，带增量与分页。"""
+    """`get_feed`：喂 AIRADAR 的归一化信息流。纯缓存，带增量与分页。
+
+    这里不触发抓取——库由后台调度器填。查询路径上不做网络请求，才能保证
+    AIRADAR 每次拿数据都是毫秒级。
+    """
 
     def __init__(self, store: Store) -> None:
         self.store = store

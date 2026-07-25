@@ -39,7 +39,11 @@ class FieldSpec(BaseModel):
     template: str | None = Field(
         default=None, description="用 {字段名或路径} 占位；可加 |urlencode"
     )
-    type: Literal["str", "int", "float", "unix", "iso"] = "str"
+    type: Literal["str", "int", "float", "unix", "iso", "strptime"] = "str"
+    format: str | None = Field(
+        default=None,
+        description="配合 type=strptime 的时间格式，如 '%b %d, %Y'（网页上的人类可读日期）",
+    )
     default: Any = None
 
     @model_validator(mode="after")
@@ -49,6 +53,8 @@ class FieldSpec(BaseModel):
             raise ValueError("path / select / template 必须且只能给一个")
         if self.attr is not None and self.select is None:
             raise ValueError("attr 只能配合 select 使用")
+        if (self.type == "strptime") != (self.format is not None):
+            raise ValueError("type=strptime 与 format 必须成对出现")
         return self
 
 
@@ -165,7 +171,7 @@ class SourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _default_platform(self) -> SourceConfig:
-        if self.platform is None and self.type is SourceType.HOTLIST:
+        if self.platform is None:
             object.__setattr__(self, "platform", self.name)
         return self
 

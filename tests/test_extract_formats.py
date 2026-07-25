@@ -150,3 +150,57 @@ class TestImpersonate:
 
     def test_absent_by_default(self, rss_config):
         assert rss_config.request.impersonate is None
+
+
+class TestStrptime:
+    """网页上的日期是给人看的格式（Jul 9, 2026），得声明式地告诉引擎怎么读。"""
+
+    PAGE = """
+    <div class="list">
+      <a href="/news/a"><span class="title">标题甲</span><time>Jul 9, 2026</time></a>
+      <a href="/news/b"><span class="title">标题乙</span><time>看不懂的日期</time></a>
+    </div>
+    """
+    CONFIG = {
+        "name": "faketime",
+        "display_name": "日期测试源",
+        "base_url": "https://example.com",
+        "request": {"url": "https://example.com/n"},
+        "extract": {
+            "format": "html",
+            "list": ".list a",
+            "fields": {
+                "native_id": {"select": ".", "attr": "href"},
+                "title": {"select": ".title"},
+                "url": {"select": ".", "attr": "href"},
+                "published_at": {
+                    "select": "time",
+                    "type": "strptime",
+                    "format": "%b %d, %Y",
+                },
+            },
+        },
+    }
+
+    def test_human_readable_date_parsed(self):
+        items = normalize(SourceConfig(**self.CONFIG), self.PAGE)
+        assert items[0].published_at.date().isoformat() == "2026-07-09"
+        assert items[0].time_basis is TimeBasis.PUBLISHED
+
+    def test_unparseable_date_falls_back_not_crashes(self):
+        """解析不了就当没有发布时间，而不是让整条数据消失。"""
+        items = normalize(SourceConfig(**self.CONFIG), self.PAGE)
+        assert items[1].published_at is None
+        assert items[1].time_basis is TimeBasis.DISCOVERED
+
+    def test_strptime_requires_format(self):
+        bad = {**self.CONFIG}
+        bad["extract"] = {
+            **bad["extract"],
+            "fields": {
+                **bad["extract"]["fields"],
+                "published_at": {"select": "time", "type": "strptime"},
+            },
+        }
+        with pytest.raises(ValidationError, match="strptime 与 format 必须成对"):
+            SourceConfig(**bad)

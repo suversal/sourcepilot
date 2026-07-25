@@ -1,6 +1,6 @@
 ---
 name: sourcepilot
-description: 查询国内多平台热榜与归一化 AI 资讯流。当用户问「现在有什么热点」「今天/最近 AI 圈有什么事」「B站/掘金/头条/V2EX 上在聊什么」，或要求按话题、时间窗筛选资讯时使用。
+description: 查询 AI 厂商官方发布与多平台科技热榜。当用户问「OpenAI/Anthropic/DeepSeek/智谱/Kimi 最近发布了什么」「今天 AI 圈有什么事」「现在有什么热点」「B站/掘金/HN/GitHub 上在聊什么」，或要求按话题、时间窗筛选资讯时使用。
 ---
 
 # SourcePilot · 信息采集平台
@@ -17,16 +17,24 @@ description: 查询国内多平台热榜与归一化 AI 资讯流。当用户问
 
 | 用户说的话 | 你要调的 |
 |---|---|
+| 「各家 AI 厂商最近发布了什么」「有什么新模型」 | `GET BASE/api/v1/items?source=vendor&window=30d` |
+| 「OpenAI / Anthropic / DeepSeek / 智谱 最近有什么动静」 | `GET BASE/api/v1/items?source=vendor&window=30d`，拿到后按 `source.platform` 筛 |
 | 「现在有什么热点」「热榜」「大家在聊什么」 | `GET BASE/api/v1/hotlist` |
-| 「B站/掘金/头条/V2EX 上什么最热」 | `GET BASE/api/v1/hotlist?platform=bilibili` |
+| 「B站/掘金/HN/GitHub 上什么最热」 | `GET BASE/api/v1/hotlist?platform=bilibili` |
 | 「今天有什么事」「过去 24 小时」 | `GET BASE/api/v1/items?window=24h` |
 | 「最近一周的 AI 模型动态」 | `GET BASE/api/v1/items?window=7d&category=model` |
 | 「有什么新产品发布」 | `GET BASE/api/v1/items?window=7d&category=product` |
 | 「这些源还活着吗」「采集正常吗」 | `GET BASE/api/v1/health` |
 
-`platform` 可选值以 `/api/v1/health` 返回的为准（当前：`bilibili` `juejin` `toutiao` `v2ex`）。
+`source` 可选值：`vendor`（厂商官方发布）、`hotlist`（平台热榜）。
+厂商官方发布覆盖：OpenAI · Anthropic · DeepSeek · 智谱 GLM · Kimi · 通义千问 ·
+字节 Seed · Google AI。它们是**一手信息**，比热榜上的二手讨论更可靠。
+
+`platform` 可选值以 `/api/v1/health` 返回的为准。
 `category` 可选值：`model` `product` `paper` `industry` `tip`。
 `window` 可选值：`1h` `6h` `24h` `7d` `30d`。
+
+**厂商发布用 30d 窗口**：官方发布本来就稀疏，24h 里经常一条都没有。
 
 **不要猜端点。** 上表没有的能力（搜 X、读单篇正文、公众号）目前还没上线，
 直接告诉用户「这个信源还没接」，不要编一个 URL 去试，也不要改用别的来源冒充。
@@ -63,6 +71,8 @@ description: 查询国内多平台热榜与归一化 AI 资讯流。当用户问
    「收录于」，`published_at` 为 `null` 时更不能编一个发布时间出来。
 3. **`score` 是源内热度，不能跨源比大小**。B站的 0.9 和 V2EX 的 0.9 没有可比性，
    不要据此说「A 比 B 更热门」。要排序就在同一个 `source.platform` 内排。
+   厂商发布（`source.type` 为 `vendor`）的 `score` 只反映它在官网列表里的位置，
+   **完全不代表重要性**——别说「这是 OpenAI 最重要的发布」。
 
 `meta.sources` 里有 `ok: false` 的条目，说明那个平台这次没取到。
 可以提一句「某平台暂时取不到」，但**不要因此判定整次查询失败**——其它平台的数据照样有效。

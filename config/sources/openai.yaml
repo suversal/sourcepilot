@@ -1,0 +1,14 @@
+name: openai
+display_name: OpenAI 官方新闻
+type: vendor
+platform: openai
+enabled: true
+min_interval: 900
+lang: en
+categories: [model, product]
+
+request:
+  url: https://openai.com/news/rss.xml
+
+extract:
+  format: rss

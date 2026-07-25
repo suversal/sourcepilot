@@ -90,7 +90,7 @@ def render_template(
     return None if missing else rendered
 
 
-def coerce(value: Any, kind: str) -> Any:
+def coerce(value: Any, kind: str, fmt: str | None = None) -> Any:
     if value is None:
         return None
     try:
@@ -111,6 +111,10 @@ def coerce(value: Any, kind: str) -> Any:
             case "iso":
                 dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
                 return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+            case "strptime":
+                # 网页上的人类可读日期通常不带时区，按 UTC 处理并如实标为 published
+                dt = datetime.strptime(str(value).strip(), fmt or "")
+                return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     except (TypeError, ValueError):
         return None
     return None
@@ -130,7 +134,7 @@ def extract_row(
         if spec.template is not None:
             continue
         raw = select_html(row, spec) if is_html else resolve_path(row, spec.path or "")
-        value = coerce(raw, spec.type)
+        value = coerce(raw, spec.type, spec.format)
         out[key] = spec.default if value is None else value
 
     for key, spec in fields.items():
@@ -139,7 +143,7 @@ def extract_row(
         raw = render_template(
             spec.template, row=row, extracted=out, base_url=base_url
         )
-        value = coerce(raw, spec.type)
+        value = coerce(raw, spec.type, spec.format)
         out[key] = spec.default if value is None else value
 
     # 相对链接补全：模板里已经拼过 base_url 的不受影响（urljoin 对绝对地址是幂等的）。

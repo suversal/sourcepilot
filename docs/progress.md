@@ -13,7 +13,7 @@
 
 ## 一句话状态
 
-契约已冻结，热榜链路端到端跑通（14 源 / 3 端点，含 newsnow 科技分类全量），X 后端未动。
+契约 v1.1.0，采集链路端到端跑通（22 源 / 3 端点 / 后台定时采集），X 后端未动。
 6 步落地顺序完成前 2 步。
 
 ---
@@ -22,8 +22,8 @@
 
 | # | 阶段 | 状态 | 产出 | 验收依据 |
 |---|---|---|---|---|
-| 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.0.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
-| 2 | REST + SKILL.md + 首个信源 | ⚠️ 基本完成 | 声明式引擎（JSON/HTML/RSS）、14 个热榜源、3 个端点、[SKILL.md](../SKILL.md) | 109 项离线测试 + 真实 uvicorn curl 验证 |
+| 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.1.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
+| 2 | REST + SKILL.md + 首个信源 | ⚠️ 基本完成 | 声明式引擎（JSON/HTML/RSS）、22 个信源、3 个端点、后台调度器、[SKILL.md](../SKILL.md) | 127 项离线测试 + 真实 uvicorn curl 验证 |
 | 3 | X 后端（签名/账号池/限流） | ⬜ 未开始 | — | — |
 | 4 | 可靠性层（Canary/故障转移/代理） | ⬜ 未开始 | — | — |
 | 5 | MCP 出口 | ⬜ 未开始 | — | — |
@@ -38,18 +38,22 @@
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
 
-已接信源 14 个，覆盖 newsnow 科技分类全量：
+已接信源 22 个，分两类：
 
-| 格式 | 信源 |
-|---|---|
-| JSON | B站排行榜 · 今日头条 · V2EX · 掘金 · 少数派 · LINUX DO · AIHOT |
-| HTML | 36氪快讯 · GitHub Trending · Hacker News · IT之家 |
-| RSS | Solidot · Product Hunt · 远景论坛 |
+- **厂商官方发布**（`source=vendor`，8 个）：OpenAI · Anthropic · DeepSeek ·
+  智谱 GLM · Kimi · 通义千问 · 字节 Seed · Google AI
+- **平台热榜**（`source=hotlist`，14 个，newsnow 科技分类全量）：B站 · 头条 ·
+  V2EX · 掘金 · 少数派 · LINUX DO · AIHOT · 36氪 · GitHub · HN · IT之家 ·
+  Solidot · Product Hunt · 远景论坛
 
-引擎为此扩了三项能力：HTML/CSS 选择器提取、RSS/Atom 提取（顺带把第 6 步的
-RSS 能力提前做了）、`request.impersonate` TLS 指纹伪装。
+引擎能力：JSON / HTML(CSS 选择器) / RSS 三种提取器、`impersonate` TLS 指纹伪装、
+`strptime` 人类可读日期、`exclude_if` 关键词剔除、`pre_request` 访客 cookie。
 
-性能：冷启动约 10.8s（14 源串行抓），间隔内约 29ms（走缓存）。
+**后台调度器**（T2 已完成）：每 60s 检查一次，到点的源自动采集。没有它，只有被
+`/hotlist` 请求打到的源会更新，厂商发布那类只走 `/items`，库里会永远是空的。
+
+性能：冷启动约 40s（22 源串行抓），查询路径不做网络请求，稳定在毫秒级。
+实测一轮采集入库 1693 条。
 
 ### 契约里定义但尚未实现
 
@@ -67,10 +71,10 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | # | 事项 | 为什么重要 |
 |---|---|---|
 | T1 | 用 Codex 装 SKILL.md 实测整链路 | 现在便宜，等 X 写完再回头改 SKILL.md 要贵得多 |
-| T2 | 定时调度器 | 当前刷新是「请求到来时顺带刷」，**没人访问就永不更新**。AIRADAR 靠 `/items` 拉增量，冷启动时库是空的 |
+
 | T3 | X 后端签名可行性验证 | 第 3 步的全部价值都押在这上面。动手写之前先确认 `x-client-transaction-id` 那套现在还有效 |
 | T4 | 跨源去重 | 契约说按 url 规范化 + 标题相似度归并。目前**只做了 url 规范化，归并逻辑没写**，跨源重复条目会直接进 feed |
-| T5 | 并发抓取 | 14 源串行，冷启动 10.8s。源多了这个数字只会更难看 |
+| T5 | 并发抓取 | 22 源串行，冷启动约 40s。源越多越难看，且调度器一轮要跑很久 |
 | T6 | 数据清理策略 | `items` 表只增不删，跑久了会一直长 |
 
 ---
@@ -87,6 +91,9 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | LINUX DO 挂在 Cloudflare 后 | 换 UA、补全套浏览器头、先取 cookie 全部 403「Just a moment...」；`impersonate=chrome/chrome131` 仍被拦，**`safari` 能过** | 配置 `request.impersonate: safari`。对方调策略时改这一行 |
 | 酷安要签名请求头 | newsnow 用设备参数 + token 算 `X-App-Token` | 配置留在仓库但禁用。签名属「重逻辑单写」，等 X 后端把那套基础设施做出来后统一接 |
 | Product Hunt 官方 API 要 Key | newsnow 走 GraphQL 需 `PRODUCTHUNT_API_TOKEN` | 用它的公开 RSS（也是 newsnow 的降级路径）。本平台匿名只读，不索要 Key |
+| 字节 Seed 博客是客户端渲染 | `/en/blog` 静态请求拿到 0 个文章链接 | 退而抓 `/en/models` 模型目录（服务端渲染，含 Seedance / Seedream）。**那是目录不是新闻流**，没有发布时间、条目基本不变。要真正的博客流得上浏览器自动化 |
+| 智谱官网也是客户端渲染 | `zhipuai.cn/news` 抓不到条目 | 改抓开放平台文档站的「新品发布」页，每条公告的 `div.update` id 就是发布日期 |
+| Anthropic 类名是构建期哈希 | `FeaturedGrid-module-scss-module__W1FydW__title` 这种，改版必变 | 选择器只依赖 href 前缀、标签结构和 `[class*="title"]` 后缀 |
 | 分类规则表很稀 | `source_rules` 为空，关键词表只有 v1 词条 | `categories` 命中率低，下游只能当过滤辅助用 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
@@ -102,6 +109,9 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 业务判断放 services.py，api.py 只做协议翻译 | 2026-07-25 | 补 MCP 出口时是加一层壳，不是抄一遍逻辑——「三出口一套核心」的守法关键 |
 | 取值层不用 jsonpath | 2026-07-25 | 点分路径 + 数组下标 + 模板拼接够热榜用，不提前上依赖。表达力不够时再换 |
 | 未实现的工具不给占位端点 | 2026-07-25 | 访问不到好过给假数据，也避免 Agent 拿占位响应编简报 |
+| 新增 `vendor` 源类型（契约 1.1.0） | 2026-07-25 | 按「谁发的」而非「怎么抓的」分类。同一厂商可能今天有 RSS、明天只剩 HTML，下游不该因传输方式变了就得改查询 |
+| 厂商发布不进 `/hotlist` | 2026-07-25 | 热榜是「大家在讨论什么」，厂商发布是「官方说了什么」。混在一起会让热度排序失去意义 |
+| 查询路径不触发抓取 | 2026-07-25 | `/items` 纯读库，由后台调度器填。AIRADAR 每次拉数据都该是毫秒级，不能被上游抖动拖住 |
 | 接入 newsnow 科技分类全量 | 2026-07-25 | 为此给引擎补了 HTML 与 RSS 提取器——「新增源=改配置」只有在引擎覆盖信源实际用的格式时才成立 |
 | 反爬手段做成配置而非代码 | 2026-07-25 | `impersonate`、`pre_request`、`exclude_if` 都是配置字段。对方改策略时改一行 YAML，不动逻辑 |
 
@@ -114,4 +124,5 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | `9bc8ba5` | 契约层 v1.0.0：冻结 Item / 信封 / 错误码 / 六工具入参 |
 | `2f945ba` | 声明式热榜引擎 + REST 出口 + SKILL.md |
 | `63e5c54` | 补进度文档，收拢三处漂移的状态记录 |
-| 本次 | 接入 newsnow 科技分类全量：引擎补 HTML/RSS 提取器 + TLS 指纹伪装，信源 4 → 14 |
+| `ad05650` | 接入 newsnow 科技分类全量：引擎补 HTML/RSS 提取器 + TLS 指纹伪装，信源 4 → 14 |
+| 本次 | 接入 8 家 AI 厂商官方发布；契约加 `vendor` 类型升 1.1.0；补后台调度器（T2） |

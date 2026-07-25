@@ -9,7 +9,7 @@ from conftest import FAKE_CONFIG_DICT, FAKE_PAYLOAD
 from fastapi.testclient import TestClient
 
 from sourcepilot.api import create_app
-from sourcepilot.contracts import UpstreamDown
+from sourcepilot.contracts import CONTRACT_VERSION, UpstreamDown
 from sourcepilot.sources import SourceConfig, engine
 
 
@@ -54,7 +54,7 @@ def _reset_broken():
 
 @pytest.fixture
 def client(store, sources, calls) -> TestClient:
-    return TestClient(create_app(store=store, sources=sources))
+    return TestClient(create_app(store=store, sources=sources, scheduler=False))
 
 
 class TestHotlist:
@@ -116,7 +116,7 @@ class TestPartialFailure:
 
     def test_all_sources_broken_with_empty_cache_is_an_error(self, store, sources, calls):
         BROKEN.update({"fake", "other"})
-        client = TestClient(create_app(store=store, sources=sources))
+        client = TestClient(create_app(store=store, sources=sources, scheduler=False))
         r = client.get("/api/v1/hotlist")
         assert r.status_code == 502
         assert r.json()["error"]["code"] == "UPSTREAM_DOWN"
@@ -173,7 +173,7 @@ class TestFeed:
 
 class TestMetaEndpoints:
     def test_root_advertises_contract_version(self, client):
-        assert client.get("/").json()["contract_version"] == "1.0.0"
+        assert client.get("/").json()["contract_version"] == CONTRACT_VERSION
 
     def test_health_reports_per_source_state(self, client):
         client.get("/api/v1/hotlist")

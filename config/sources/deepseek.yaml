@@ -1,0 +1,25 @@
+# DeepSeek 的发布公告在 api-docs 站（Docusaurus）的侧栏里，正文页反而没有列表。
+# 侧栏每条形如「DeepSeek-V4 Preview Release 2026/04/24」，标题自带日期。
+name: deepseek
+display_name: DeepSeek 发布公告
+type: vendor
+platform: deepseek
+enabled: true
+min_interval: 1800
+lang: en
+base_url: https://api-docs.deepseek.com
+categories: [model]
+
+request:
+  url: https://api-docs.deepseek.com/news/news260424
+
+extract:
+  format: html
+  list: 'a.menu__link[href^="/news/news"]'
+  fields:
+    native_id: { select: ".", attr: href }
+    title: { select: "." }
+    url: { select: ".", attr: href }
+  exclude_if:
+    # 侧栏顶部有个折叠父节点，文字就是「News」，不是真条目。
+    title: [News, English]

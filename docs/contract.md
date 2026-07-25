@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.0.0
+# SourcePilot · 工具契约 v1.1.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.0.0",
+    "contract_version": "1.1.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -113,7 +113,7 @@ MCP 侧没有 HTTP 状态码，只看信封的 `ok` 与 `error.code`，语义完
 | 字段 | 必填 | 约定 |
 |---|---|---|
 | `id` | 是 | `{source_type}:{native_id}`，全局唯一。跨源去重另按 `url` 规范化 + 标题相似度归并，**不改 id** |
-| `source.type` | 是 | 枚举：`x` `hotlist` `wechat` `rss` `web` |
+| `source.type` | 是 | 枚举：`x` `hotlist` `wechat` `rss` `web` `vendor` |
 | `source.name` | 是 | 人类可读源名，如 `"X / Twitter"` `"微博热搜"` |
 | `source.platform` | 否 | 子平台标识，热榜专用：`weibo` `zhihu` `douyin` `bilibili` … |
 | `title` | 是 | 非空。无标题的源（如纯图推文）取正文首 80 字符 |
@@ -307,6 +307,23 @@ AIRADAR 做增量拉取时，首次请求带 `since`，后续翻页带 `cursor` 
 - **对外接口匿名只读**，不索要用户 Key / cookie。
 - `AUTH_EXPIRED` 对外只表示「平台侧暂时不可用」，**不暴露账号细节**（哪个账号、为什么失效）。
 - `raw` 字段可能含有信源原始文本，消费方渲染前需自行转义。
+
+---
+
+## 5.1 `vendor` 源类型（v1.1.0 新增）
+
+`vendor` = **厂商官方发布**：OpenAI、Anthropic、DeepSeek、智谱、Kimi、通义、
+字节 Seed、Google AI 等自家官网的新闻与发布说明。
+
+按「**谁发的**」而不是「**怎么抓的**」分类。同一家厂商可能今天提供 RSS、
+明天撤掉只剩 HTML 列表页——那是采集侧的事，下游不该因为传输方式变了就得改查询。
+所以不用 `rss` / `web` 区分它们。
+
+消费方拿这批数据：`GET /api/v1/items?source=vendor&window=7d`。
+
+与热榜的区别：热榜是「大家在讨论什么」（有排名、有热度、变化快），
+厂商发布是「官方说了什么」（一手信息、无热度信号、`score` 按列表顺序给）。
+两者**不混在 `/hotlist` 里**——`/hotlist` 只返回 `hotlist` 类型的源。
 
 ---
 

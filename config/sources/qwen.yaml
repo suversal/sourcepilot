@@ -1,0 +1,14 @@
+name: qwen
+display_name: 通义千问 Qwen 博客
+type: vendor
+platform: qwen
+enabled: true
+min_interval: 1800
+lang: en
+categories: [model]
+
+request:
+  url: https://qwenlm.github.io/blog/index.xml
+
+extract:
+  format: rss

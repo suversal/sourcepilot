@@ -1,0 +1,25 @@
+# Moonshot 的研究博客现在挂在 kimi.com/blog 下。卡片里两个 span：
+# 第一个是模型/项目名，第二个是副标题。
+name: kimi
+display_name: Kimi（月之暗面）研究博客
+type: vendor
+platform: kimi
+enabled: true
+min_interval: 1800
+lang: en
+categories: [model]
+
+request:
+  url: https://www.kimi.com/blog/
+
+extract:
+  format: html
+  list: 'a[href*="/blog/"]'
+  fields:
+    native_id: { select: ".", attr: href }
+    title: { select: "span:first-child" }
+    url: { select: ".", attr: href }
+    summary: { select: "span:nth-child(2)" }
+  exclude_if:
+    # 顶部有个指回博客首页的导航链接，不是文章。
+    title: [Research]

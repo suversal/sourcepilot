@@ -1,0 +1,25 @@
+# 智谱官网 zhipuai.cn/news 是 RSC 客户端渲染，静态抓不到条目。
+# 改抓开放平台文档站的「新品发布」页：每条公告是一个 div.update，
+# id 就是发布日期，正好当 native_id 和 published_at 用。
+name: zhipu
+display_name: 智谱 GLM 新品发布
+type: vendor
+platform: zhipu
+enabled: true
+min_interval: 1800
+lang: zh
+categories: [model, product]
+
+request:
+  url: https://docs.bigmodel.cn/cn/update/new-releases
+  timeout: 25
+
+extract:
+  format: html
+  list: div.update[id]
+  fields:
+    native_id: { select: ".", attr: id }
+    title: { select: ".text-secondary" }
+    url: { template: "https://docs.bigmodel.cn/cn/update/new-releases#{native_id}" }
+    summary: { select: ".prose-sm" }
+    published_at: { select: ".", attr: id, type: iso }

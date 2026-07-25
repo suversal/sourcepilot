@@ -24,6 +24,10 @@ class SourceType(StrEnum):
     WECHAT = "wechat"
     RSS = "rss"
     WEB = "web"
+    #: 厂商官方发布（OpenAI / Anthropic / DeepSeek 等的官网新闻与发布说明）。
+    #: 按「谁发的」而不是「怎么抓的」分类——同一家可能今天有 RSS、明天只剩 HTML，
+    #: 下游不该因为传输方式变了就得改查询。
+    VENDOR = "vendor"
 
 
 class MediaType(StrEnum):
