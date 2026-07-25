@@ -1,0 +1,29 @@
+# 分类规则表（确定性打标，不走 LLM）。契约见 docs/contract.md §2。
+#
+# 两级规则，命中即打标，允许多标签：
+#   source_rules   — 某些源天然属于某类
+#   keyword_rules  — 标题 + 摘要命中关键词/正则
+# 全不命中则 categories 为空数组（表示「规则没命中」，不代表「不属于任何类」）。
+
+version: 1
+
+source_rules:
+  # source.type 或 source.platform → 分类
+  # arxiv: [paper]
+
+keyword_rules:
+  model:
+    keywords: [GPT, Claude, Gemini, Llama, 大模型, 开源模型, 参数量, 微调, 蒸馏]
+    patterns: ['(?i)\b(LLM|SOTA|MoE)\b']
+  product:
+    keywords: [发布, 上线, 内测, 公测, 新功能, 定价, API 开放]
+    patterns: []
+  paper:
+    keywords: [论文, 预印本, arXiv, 综述]
+    patterns: ['(?i)\barxiv\.org\b']
+  industry:
+    keywords: [融资, 收购, 估值, 裁员, 监管, 合规, 芯片, 算力]
+    patterns: []
+  tip:
+    keywords: [教程, 实践, 技巧, 踩坑, 最佳实践, 提示词]
+    patterns: []

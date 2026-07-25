@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 运行时数据与私密配置：账号池、cookie、代理凭据一律不进仓库
+*.db
+*.sqlite3
+data/
+.env
+config/accounts.yaml
+config/proxies.yaml
+
+.DS_Store
