@@ -26,8 +26,10 @@
 契约里的 `search_x` / `get_x_timeline` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
 
-公众号 channel 已建好但默认禁用：它必须有登录态才能工作，扫码授权只能由你本人完成
-（`python -m sourcepilot.channels.login`，建议用专用小号）。
+公众号 channel 已建好但默认禁用：它必须有登录态才能工作。两种拿凭据的方式——
+在自己浏览器里登录后手动复制 token 与 cookie（推荐，无自动化痕迹），
+或跑 `python -m sourcepilot.channels.login` 扫码（建议用专用小号）。
+详见 [config/sources/wechat.yaml](config/sources/wechat.yaml) 文件头。
 
 已接信源 22 个，分两类：
 

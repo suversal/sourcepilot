@@ -3,11 +3,24 @@
 # 为什么不能匿名：mp.weixin.qq.com 的 searchbiz 与 appmsgpublish 两个接口，
 # 不带登录态一律返回 {"ret":200003,"err_msg":"invalid session"}（实测 2026-07-26）。
 #
-# 怎么启用：
-#   1. python -m sourcepilot.channels.login   → 会存一张二维码图片并打印路径
-#   2. 用**专用微信小号**扫码（别用主号，这条线风险最高）
-#   3. 命令自动把凭据写进 config/wechat_credentials.yaml（已在 .gitignore 里）
-#   4. 把下面 enabled 改成 true，填上要订阅的公众号名
+# 怎么拿凭据（两条路，任选，都写进 config/wechat_credentials.yaml）：
+#
+#   路线 A · 手动复制（推荐先用这条）
+#     在自己浏览器里正常登录 mp.weixin.qq.com，然后：
+#       token  ← 地址栏 URL 里 token= 后面那串数字
+#       cookie ← 开发者工具 → Network → 任一请求 → Request Headers 里的 Cookie
+#     写成：
+#       token: "1234567890"
+#       cookie: "slave_sid=...; slave_user=...; bizuin=..."
+#     完全不涉及自动化登录，风控面最小。
+#
+#   路线 B · 扫码
+#     python -m sourcepilot.channels.login
+#     会存一张二维码图片并打印路径，用**专用微信小号**扫（别用主号）。
+#     实测裸 HTTP 就能跑通这套流程，不需要浏览器驱动——参考项目 we-mp-rss 上
+#     Playwright 主要是为了顺带做多账号切换和指纹伪装，纯登录用不着。
+#
+#   拿到凭据后把下面 enabled 改成 true，填上要订阅的公众号名。
 #
 # 这块是全平台最可能被官方封的一条线，所以整块隔离在 channels/wechat.py，
 # 坏了整块换掉，不牵动其它信源。

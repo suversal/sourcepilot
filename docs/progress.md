@@ -100,7 +100,7 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 关键词分类误标率高 | 开着时 1737 条里 model 命中 1251、product 1203，几乎等于没过滤。子串匹配让「ChatGPT」命中 `model`，匹配摘要让 RSS 随口一提就中标 | **默认关闭**，只保留主题单一信源的源级映射（model 1251→75）。空数组是诚实的，错标签会误导 AIRADAR 的筛选 |
 | AIHOT 是二手聚合源 | 全仓库唯一一个吃「别人聚合结果」的源，其余 23 个都直连平台自己的接口 | 已在配置文件头标注。它挂了我们查不出根因，且内容可能与自接的一手源重复——跨源去重做出来后要留意 |
 | 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
-| 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | channel 已建好并默认禁用。扫码那步只能由使用者本人完成（`python -m sourcepilot.channels.login`），凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
+| 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | channel 已建好并默认禁用。凭据两条路：浏览器里登录后手动复制 token+cookie（推荐，无自动化痕迹），或跑扫码助手。实测裸 HTTP 的扫码流程可用（startlogin 回 uuid、getqrcode 回真实 JPEG），**不需要 Playwright**——参考项目 we-mp-rss 上浏览器是为了多账号切换和指纹伪装。凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
 | 公众号是最易被封的一条线 | 走的是公众平台后台接口，不是官方开放 API | 整块隔离在 `channels/wechat.py`，坏了整块换。账号之间留 3 秒间隔，凭据失效立刻停手不继续捅 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
