@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -29,6 +30,8 @@ from ..contracts import (
 )
 from .config import FieldSpec, SourceConfig
 from .extract import extract_row, resolve_path
+
+log = logging.getLogger("sourcepilot.engine")
 
 #: 追踪参数。不清掉的话，同一条内容会因为埋点串不同而躲过跨源去重。
 TRACKING_PARAMS = frozenset(
@@ -294,5 +297,52 @@ def rank_to_score(rank: int, total: int) -> float:
     return round((total - rank) / total, 4)
 
 
+def verify_urls(
+    config: SourceConfig, items: list[Item], client: httpx.Client | None = None
+) -> list[Item]:
+    """逐条确认 URL 真的存在，404 的丢掉。
+
+    只给 URL 是推导出来的源用。推导规则（比如「文章地址 = 标题 slug 化」）是对
+    站点的假设，站点一改就会悄悄产出一堆死链——开着这个，假设失效会表现为
+    条目数下降，在 /health 里看得见。
+    """
+    owns_client = client is None
+    client = client or httpx.Client(follow_redirects=True)
+    alive: list[Item] = []
+    try:
+        for item in items:
+            try:
+                response = client.head(
+                    str(item.url),
+                    headers=config.request.merged_headers(),
+                    timeout=config.request.timeout,
+                )
+                if response.status_code == 405:  # 有些站点不认 HEAD
+                    response = client.get(
+                        str(item.url),
+                        headers=config.request.merged_headers(),
+                        timeout=config.request.timeout,
+                    )
+                if response.status_code < 400:
+                    alive.append(item)
+                else:
+                    log.warning(
+                        "%s 推导出的 URL 无效（%s）：%s",
+                        config.name,
+                        response.status_code,
+                        item.url,
+                    )
+            except httpx.HTTPError:
+                # 校验本身失败不等于条目无效，放行，别因为网络抖动丢数据。
+                alive.append(item)
+    finally:
+        if owns_client:
+            client.close()
+    return alive
+
+
 def collect(config: SourceConfig, client: httpx.Client | None = None) -> list[Item]:
-    return normalize(config, fetch_raw(config, client))
+    items = normalize(config, fetch_raw(config, client))
+    if config.verify_urls:
+        items = verify_urls(config, items, client)
+    return items

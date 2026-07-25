@@ -124,19 +124,38 @@ class TestPartialFailure:
 
 
 class TestFeed:
-    def test_window_filters_out_old_items(self, client, store):
+    def test_window_filters_on_publish_time_not_discovery(self, client, store):
+        """时间窗问的是「最近发生了什么」。
+
+        按收录时间过滤的话，首次采集会把陈年旧文全变成「今天的新闻」——
+        OpenAI 官网 RSS 里几年前的文章会一股脑挤进 24h 窗口。
+        """
         client.get("/api/v1/hotlist")
-        assert client.get("/api/v1/items", params={"window": "24h"}).json()["data"]["items"]
-        # 手动把所有条目的收录时间推到 30 天前之外
+        assert client.get("/api/v1/items", params={"window": "30d"}).json()["data"]["items"]
+
+        # 收录时间保持今天，只把发布时间推到很久以前
         with store._conn() as conn:
-            conn.execute("UPDATE items SET discovered_at = '2020-01-01T00:00:00Z'")
-        assert client.get("/api/v1/items", params={"window": "30d"}).json()["data"]["items"] == []
+            conn.execute("UPDATE items SET effective_at = '2020-01-01T00:00:00Z'")
+
+        body = client.get("/api/v1/items", params={"window": "30d"}).json()
+        assert body["data"]["items"] == [], "发布于 2020 年的条目不该出现在 30 天窗口里"
+
+    def test_since_still_tracks_discovery_time(self, client, store):
+        """增量同步问的是「上次拉取之后你们又收到了什么」，那必须看收录时间。"""
+        client.get("/api/v1/hotlist")
+        with store._conn() as conn:
+            conn.execute("UPDATE items SET effective_at = '2020-01-01T00:00:00Z'")
+        body = client.get(
+            "/api/v1/items",
+            params={"window": "30d", "since": "2020-06-01T00:00:00Z"},
+        ).json()
+        assert body["data"]["items"] == [], "window 与 since 是与的关系，各管各的时间"
 
     def test_pagination_yields_each_item_once(self, client):
         client.get("/api/v1/hotlist")
         seen, cursor = [], None
         for _ in range(5):
-            params = {"limit": 1, **({"cursor": cursor} if cursor else {})}
+            params = {"limit": 1, "window": "30d", **({"cursor": cursor} if cursor else {})}
             body = client.get("/api/v1/items", params=params).json()
             seen += [i["id"] for i in body["data"]["items"]]
             cursor = body["meta"]["next_cursor"]
@@ -146,17 +165,20 @@ class TestFeed:
 
     def test_last_page_has_no_cursor(self, client):
         client.get("/api/v1/hotlist")
-        body = client.get("/api/v1/items", params={"limit": 100}).json()
+        body = client.get("/api/v1/items", params={"limit": 100, "window": "30d"}).json()
         assert body["meta"]["has_more"] is False
         assert body["meta"]["next_cursor"] is None
 
     def test_since_and_cursor_coexist(self, client):
         client.get("/api/v1/hotlist")
         old = "2020-01-01T00:00:00Z"
-        first = client.get("/api/v1/items", params={"since": old, "limit": 1}).json()
+        first = client.get(
+            "/api/v1/items", params={"since": old, "limit": 1, "window": "30d"}
+        ).json()
         cursor = first["meta"]["next_cursor"]
         second = client.get(
-            "/api/v1/items", params={"since": old, "cursor": cursor, "limit": 1}
+            "/api/v1/items",
+            params={"since": old, "cursor": cursor, "limit": 1, "window": "30d"},
         ).json()
         assert second["ok"] is True
         assert second["data"]["items"][0]["id"] != first["data"]["items"][0]["id"]

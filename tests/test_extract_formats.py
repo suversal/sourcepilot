@@ -204,3 +204,48 @@ class TestStrptime:
         }
         with pytest.raises(ValidationError, match="strptime 与 format 必须成对"):
             SourceConfig(**bad)
+
+
+class TestSlug:
+    """有些站点的文章卡片不是链接，地址得从标题推出来（字节 Seed 就是）。"""
+
+    def test_slugify_basic(self):
+        from sourcepilot.sources.extract import slugify
+
+        assert slugify("Seed2.1 Officially Released: Advancing AI") == (
+            "seed2-1-officially-released-advancing-ai"
+        )
+
+    def test_slugify_collapses_separators(self):
+        from sourcepilot.sources.extract import slugify
+
+        assert slugify("A | B — C") == "a-b-c"
+
+    def test_slugify_strips_edges(self):
+        from sourcepilot.sources.extract import slugify
+
+        assert slugify("  (Hello!)  ") == "hello"
+
+    def test_template_can_chain_off_slug(self):
+        """native_id 由标题 slug 化，url 再引用 native_id——模板按声明顺序求值。"""
+        config = SourceConfig(
+            **{
+                "name": "fakeslug",
+                "display_name": "slug 测试源",
+                "base_url": "https://example.com",
+                "request": {"url": "https://example.com/blog"},
+                "extract": {
+                    "format": "html",
+                    "list": "div.card",
+                    "fields": {
+                        "title": {"select": "img", "attr": "alt"},
+                        "native_id": {"template": "{title}", "type": "slug"},
+                        "url": {"template": "{base_url}/p/{native_id}"},
+                    },
+                },
+            }
+        )
+        page = '<div class="card"><img alt="Hello World: Part 2"/></div>'
+        (item,) = normalize(config, page)
+        assert item.id == "hotlist:fakeslug_hello-world-part-2"
+        assert str(item.url) == "https://example.com/p/hello-world-part-2"

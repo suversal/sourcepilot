@@ -167,3 +167,54 @@ class TestScheduler:
         finally:
             scheduler.stop()
         assert len(rounds) >= 2, "出错后应该继续下一轮"
+
+
+class TestVerifyUrls:
+    """URL 是推导出来的时候，得能把「推导规则失效」变成可见的条目减少。"""
+
+    PAGE = (
+        '<div class="card"><img alt="Alive Post"/></div>'
+        '<div class="card"><img alt="Dead Post"/></div>'
+    )
+    CONFIG = {
+        "name": "slugsrc",
+        "display_name": "推导 URL 的源",
+        "base_url": "https://example.com",
+        "verify_urls": True,
+        "request": {"url": "https://example.com/blog"},
+        "extract": {
+            "format": "html",
+            "list": "div.card",
+            "fields": {
+                "title": {"select": "img", "attr": "alt"},
+                "native_id": {"template": "{title}", "type": "slug"},
+                "url": {"template": "{base_url}/p/{native_id}"},
+            },
+        },
+    }
+
+    @pytest.fixture
+    def stub_http(self, monkeypatch):
+        import httpx
+
+        from sourcepilot.sources import engine as eng
+
+        monkeypatch.setattr(eng, "fetch_raw", lambda config, client=None: self.PAGE)
+
+        def fake_head(self_client, url, **kw):
+            code = 404 if "dead-post" in url else 200
+            return httpx.Response(code, request=httpx.Request("HEAD", url))
+
+        monkeypatch.setattr(httpx.Client, "head", fake_head)
+
+    def test_dead_urls_dropped(self, stub_http):
+        from sourcepilot.sources import collect
+
+        items = collect(SourceConfig(**self.CONFIG))
+        assert [i.title for i in items] == ["Alive Post"]
+
+    def test_disabled_by_default_keeps_everything(self, stub_http):
+        from sourcepilot.sources import collect
+
+        items = collect(SourceConfig(**{**self.CONFIG, "verify_urls": False}))
+        assert len(items) == 2, "没开校验就不该多发请求，也不该丢条目"

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urljoin
@@ -90,6 +91,16 @@ def render_template(
     return None if missing else rendered
 
 
+def slugify(text: str) -> str:
+    """标题 → URL 片段：小写，非字母数字一律折成连字符。
+
+    有些站点的文章地址就是标题的规范化结果，页面里反而没有链接可抓。
+    这是对站点的假设，用 verify_urls 兜底。
+    """
+    normalized = unicodedata.normalize("NFKD", text).lower()
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
 def coerce(value: Any, kind: str, fmt: str | None = None) -> Any:
     if value is None:
         return None
@@ -111,6 +122,8 @@ def coerce(value: Any, kind: str, fmt: str | None = None) -> Any:
             case "iso":
                 dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
                 return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+            case "slug":
+                return slugify(str(value)) or None
             case "strptime":
                 # 网页上的人类可读日期通常不带时区，按 UTC 处理并如实标为 published
                 dt = datetime.strptime(str(value).strip(), fmt or "")

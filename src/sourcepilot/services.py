@@ -111,7 +111,7 @@ class FeedService:
             source_type=params.source,
             category=params.category,
             since=params.since,
-            discovered_after=window_start,
+            published_after=window_start,
             limit=params.limit + 1,
             cursor=params.cursor,
         )

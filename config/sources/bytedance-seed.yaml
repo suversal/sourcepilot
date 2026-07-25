@@ -1,10 +1,16 @@
-# 注意：这是模型目录，不是新闻流。
-# seed.bytedance.com/en/blog 的文章列表是客户端渲染的，静态请求拿不到（实测
-# 整页 0 个 /blog/ 链接）。导航里的模型页是服务端渲染的，能稳定拿到——
-# Seedance / Seedream / Seed2.1 等发布都在其中，但没有发布时间，
-# 条目集合也基本不变。要拿到真正的博客流得上浏览器自动化，那是后话。
+# 字节 Seed 技术博客。
+#
+# 这页有两个坑，都实测确认过（2026-07-25）：
+#  1. 博客卡片是 div 不是 <a>，跳转由 JS 处理——页面里**根本没有文章链接**，
+#     渲染完也没有。所以按 href 找条目会一无所获。
+#  2. 卡片外层带 style="display:none"，但内容本身是服务端渲染的，静态请求就能拿到
+#     标题、日期、分类。
+#
+# 文章地址是标题的 slug 化结果（EdgeBench: Measuring… → edgebench-measuring-…），
+# 9 条全量验证过 9/9 命中。这是对站点的假设，所以开 verify_urls 兜底：
+# 规则一旦失效，表现为条目数下降（/health 看得见），而不是产出一堆死链。
 name: bytedance-seed
-display_name: 字节 Seed 模型发布
+display_name: 字节 Seed 技术博客
 type: vendor
 platform: bytedance-seed
 enabled: true
@@ -12,18 +18,21 @@ min_interval: 3600
 lang: en
 base_url: https://seed.bytedance.com
 categories: [model]
+verify_urls: true
 
 request:
-  url: https://seed.bytedance.com/en/models
+  url: https://seed.bytedance.com/en/blog
+  timeout: 25
 
 extract:
   format: html
-  list: 'a[href^="/en/"]'
+  list: div.group.cursor-pointer
   fields:
-    native_id: { select: ".", attr: href }
-    title: { select: "." }
-    url: { select: ".", attr: href }
+    # img 的 alt 就是完整标题，比正文 div 干净（不受 line-clamp 截断影响）。
+    title: { select: "img", attr: alt }
+    native_id: { template: "{title}", type: slug }
+    url: { template: "{base_url}/en/blog/{native_id}" }
+    published_at: { select: "div.mt-\\[20px\\].flex > div:first-child", type: strptime, format: "%b %d, %Y" }
   exclude_if:
-    # 导航里混着栏目入口和招聘页，不是模型发布。
-    title: [Blog, Models, Research, Career, Seed Edge, Fellows, Recruitment, View All, Learn More]
-    url: [public_papers, career, seedstem, seedearlycareer]
+    # 博客里混着招聘公告，不是发布信息。
+    title: [Recruitment, Campus, Internship]

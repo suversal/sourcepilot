@@ -47,7 +47,8 @@
   Solidot · Product Hunt · 远景论坛
 
 引擎能力：JSON / HTML(CSS 选择器) / RSS 三种提取器、`impersonate` TLS 指纹伪装、
-`strptime` 人类可读日期、`exclude_if` 关键词剔除、`pre_request` 访客 cookie。
+`strptime` 人类可读日期、`slug` 标题转地址、`verify_urls` 推导地址自检、
+`exclude_if` 关键词剔除、`pre_request` 访客 cookie。
 
 **后台调度器**（T2 已完成）：每 60s 检查一次，到点的源自动采集。没有它，只有被
 `/hotlist` 请求打到的源会更新，厂商发布那类只走 `/items`，库里会永远是空的。
@@ -91,7 +92,7 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | LINUX DO 挂在 Cloudflare 后 | 换 UA、补全套浏览器头、先取 cookie 全部 403「Just a moment...」；`impersonate=chrome/chrome131` 仍被拦，**`safari` 能过** | 配置 `request.impersonate: safari`。对方调策略时改这一行 |
 | 酷安要签名请求头 | newsnow 用设备参数 + token 算 `X-App-Token` | 配置留在仓库但禁用。签名属「重逻辑单写」，等 X 后端把那套基础设施做出来后统一接 |
 | Product Hunt 官方 API 要 Key | newsnow 走 GraphQL 需 `PRODUCTHUNT_API_TOKEN` | 用它的公开 RSS（也是 newsnow 的降级路径）。本平台匿名只读，不索要 Key |
-| 字节 Seed 博客是客户端渲染 | `/en/blog` 静态请求拿到 0 个文章链接 | 退而抓 `/en/models` 模型目录（服务端渲染，含 Seedance / Seedream）。**那是目录不是新闻流**，没有发布时间、条目基本不变。要真正的博客流得上浏览器自动化 |
+| 字节 Seed 页面里没有文章链接 | 卡片是 `div` 不是 `<a>`，跳转由 JS 处理；渲染完 DOM 里也依然没有 href。但**卡片内容本身是服务端渲染的**（外层 `display:none`），标题/日期/分类静态就能拿到 | 文章地址 = 标题 slug 化（9 条全量验证 9/9 命中）。因为这是对站点的假设，开 `verify_urls` 逐条校验兜底。**没有用浏览器自动化** |
 | 智谱官网也是客户端渲染 | `zhipuai.cn/news` 抓不到条目 | 改抓开放平台文档站的「新品发布」页，每条公告的 `div.update` id 就是发布日期 |
 | Anthropic 类名是构建期哈希 | `FeaturedGrid-module-scss-module__W1FydW__title` 这种，改版必变 | 选择器只依赖 href 前缀、标签结构和 `[class*="title"]` 后缀 |
 | 分类规则表很稀 | `source_rules` 为空，关键词表只有 v1 词条 | `categories` 命中率低，下游只能当过滤辅助用 |
@@ -109,6 +110,8 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 业务判断放 services.py，api.py 只做协议翻译 | 2026-07-25 | 补 MCP 出口时是加一层壳，不是抄一遍逻辑——「三出口一套核心」的守法关键 |
 | 取值层不用 jsonpath | 2026-07-25 | 点分路径 + 数组下标 + 模板拼接够热榜用，不提前上依赖。表达力不够时再换 |
 | 未实现的工具不给占位端点 | 2026-07-25 | 访问不到好过给假数据，也避免 Agent 拿占位响应编简报 |
+| 信息流按发布时间排序与过滤 | 2026-07-25 | 原先 `window` 按收录时间过滤，首次采集会把陈年旧文全变成「今天的新闻」（OpenAI RSS 的 1050 篇历史文章挤满 24h 窗口）。改为 `window` 看发布时间、`since` 看收录时间，各管各的 |
+| 字节 Seed 不上浏览器自动化 | 2026-07-25 | 先验证了「文章地址 = 标题 slug 化」9/9 命中，静态请求就能拿到完整博客流。符合「能走稳定接口就不用浏览器自动化」 |
 | 新增 `vendor` 源类型（契约 1.1.0） | 2026-07-25 | 按「谁发的」而非「怎么抓的」分类。同一厂商可能今天有 RSS、明天只剩 HTML，下游不该因传输方式变了就得改查询 |
 | 厂商发布不进 `/hotlist` | 2026-07-25 | 热榜是「大家在讨论什么」，厂商发布是「官方说了什么」。混在一起会让热度排序失去意义 |
 | 查询路径不触发抓取 | 2026-07-25 | `/items` 纯读库，由后台调度器填。AIRADAR 每次拉数据都该是毫秒级，不能被上游抖动拖住 |
@@ -125,4 +128,5 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | `2f945ba` | 声明式热榜引擎 + REST 出口 + SKILL.md |
 | `63e5c54` | 补进度文档，收拢三处漂移的状态记录 |
 | `ad05650` | 接入 newsnow 科技分类全量：引擎补 HTML/RSS 提取器 + TLS 指纹伪装，信源 4 → 14 |
-| 本次 | 接入 8 家 AI 厂商官方发布；契约加 `vendor` 类型升 1.1.0；补后台调度器（T2） |
+| `7f35ad6` | 接入 8 家 AI 厂商官方发布；契约加 `vendor` 类型升 1.1.0；补后台调度器（T2） |
+| 本次 | 字节 Seed 换成真实博客流（slug 推导 + URL 自检）；修正信息流的时间语义 |

@@ -39,7 +39,7 @@ class FieldSpec(BaseModel):
     template: str | None = Field(
         default=None, description="用 {字段名或路径} 占位；可加 |urlencode"
     )
-    type: Literal["str", "int", "float", "unix", "iso", "strptime"] = "str"
+    type: Literal["str", "int", "float", "unix", "iso", "strptime", "slug"] = "str"
     format: str | None = Field(
         default=None,
         description="配合 type=strptime 的时间格式，如 '%b %d, %Y'（网页上的人类可读日期）",
@@ -164,6 +164,15 @@ class SourceConfig(BaseModel):
     )
     categories: list[str] = Field(
         default_factory=list, description="源级分类，无条件打在该源所有条目上"
+    )
+    verify_urls: bool = Field(
+        default=False,
+        description=(
+            "逐条 HEAD 校验生成的 URL，404 的丢掉。"
+            "只在 URL 是推导出来的（比如把标题 slug 化）时才开——"
+            "推导规则是对站点的假设，开着它才能把假设失效变成可见的条目数下降，"
+            "而不是悄悄产出一堆死链。"
+        ),
     )
     pre_request: PreRequestSpec | None = None
     request: RequestSpec

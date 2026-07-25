@@ -28,7 +28,7 @@
 已接信源 22 个，分两类：
 
 **厂商官方发布**（`source=vendor`，一手信息）——
-OpenAI · Anthropic · DeepSeek · 智谱 GLM · Kimi · 通义千问 · 字节 Seed · Google AI
+OpenAI · Anthropic · DeepSeek · 智谱 GLM · Kimi · 通义千问 · 字节 Seed 技术博客 · Google AI
 
 **平台热榜**（`source=hotlist`，newsnow 科技分类全量）——
 B站 · 今日头条 · V2EX · 掘金 · 少数派 · LINUX DO · AIHOT · 36氪 · GitHub Trending ·

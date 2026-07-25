@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS items (
     author        TEXT,
     published_at  TEXT,
     discovered_at TEXT NOT NULL,
+    -- 发布时间，取不到就退回收录时间。信息流的排序与时间窗都按它算：
+    -- 按 discovered_at 排会让「首次采集」把陈年旧文全变成今天的新闻。
+    effective_at  TEXT NOT NULL,
     time_basis    TEXT NOT NULL,
     score         REAL NOT NULL,
     categories    TEXT NOT NULL,
@@ -75,6 +78,23 @@ class Store:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """补齐老库缺的列。`CREATE TABLE IF NOT EXISTS` 不会给已存在的表加列。"""
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+        if "effective_at" not in existing:
+            conn.execute("ALTER TABLE items ADD COLUMN effective_at TEXT")
+            conn.execute(
+                "UPDATE items SET effective_at = COALESCE(published_at, discovered_at)"
+            )
+        # 索引必须建在这里而不是 SCHEMA 里——老库补列之前，SCHEMA 里的建索引语句
+        # 会因为列不存在而整段失败。
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_items_effective "
+            "ON items(effective_at DESC, id DESC)"
+        )
 
     @contextmanager
     def _conn(self):
@@ -101,6 +121,7 @@ class Store:
                 item.author,
                 _iso(item.published_at) if item.published_at else None,
                 _iso(item.discovered_at),
+                _iso(item.effective_time),
                 item.time_basis.value,
                 item.score,
                 json.dumps([c.value for c in item.categories]),
@@ -116,10 +137,11 @@ class Store:
             # discovered_at 保持首次收录时间不变——增量拉取（since）依赖它稳定。
             conn.executemany(
                 """
-                INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title, summary=excluded.summary, url=excluded.url,
                     author=excluded.author, published_at=excluded.published_at,
+                    effective_at=excluded.effective_at,
                     time_basis=excluded.time_basis, score=excluded.score,
                     categories=excluded.categories, media=excluded.media, raw=excluded.raw
                 """,
@@ -134,7 +156,7 @@ class Store:
         source_type: SourceType | None = None,
         category: Category | None = None,
         since: datetime | None = None,
-        discovered_after: datetime | None = None,
+        published_after: datetime | None = None,
         limit: int = 50,
         cursor: str | None = None,
         order_by_score: bool = False,
@@ -152,18 +174,20 @@ class Store:
             where.append("categories LIKE ?")
             args.append(f'%"{category.value}"%')
         if since is not None:
+            # 增量同步：问的是「上次拉取之后我们又收到了什么」，所以看收录时间。
             where.append("discovered_at > ?")
             args.append(_iso(since))
-        if discovered_after is not None:
-            where.append("discovered_at >= ?")
-            args.append(_iso(discovered_after))
+        if published_after is not None:
+            # 时间窗：问的是「最近发生了什么」，所以看发布时间。
+            where.append("effective_at >= ?")
+            args.append(_iso(published_after))
 
         if cursor is not None:
             cur_time, cur_id = decode_cursor(cursor)
-            where.append("(discovered_at < ? OR (discovered_at = ? AND id < ?))")
+            where.append("(effective_at < ? OR (effective_at = ? AND id < ?))")
             args.extend([cur_time, cur_time, cur_id])
 
-        order = "score DESC, id DESC" if order_by_score else "discovered_at DESC, id DESC"
+        order = "score DESC, id DESC" if order_by_score else "effective_at DESC, id DESC"
         clause = f" WHERE {' AND '.join(where)}" if where else ""
         sql = f"SELECT * FROM items{clause} ORDER BY {order} LIMIT ?"
         args.append(limit)
@@ -257,7 +281,7 @@ def _row_to_item(row: sqlite3.Row) -> Item:
 
 
 def encode_cursor(item: Item) -> str:
-    payload = f"{_iso(item.discovered_at)}|{item.id}"
+    payload = f"{_iso(item.effective_time)}|{item.id}"
     return urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
