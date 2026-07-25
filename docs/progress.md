@@ -37,6 +37,7 @@
 - `GET /api/v1/hotlist` — 多平台热榜（缓存），单平台失败不拖垮全局
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
+- `GET /api/v1/article` — 读单篇正文转 Markdown（现查，带 SSRF 防护）
 
 已接信源 22 个，分两类：
 
@@ -58,7 +59,7 @@
 
 ### 契约里定义但尚未实现
 
-`search_x` · `get_x_timeline` · `get_wechat_feed` · `read_article`
+`search_x` · `get_x_timeline` · `get_wechat_feed`
 
 **刻意不给占位端点**——没接的能力就是访问不到，不返回假数据。
 SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。

@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.1.0
+# SourcePilot · 工具契约 v1.2.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.1.0",
+    "contract_version": "1.2.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -189,7 +189,8 @@ v1 词表：`model` `product` `paper` `industry` `tip`。允许多标签，无�
 | `mode`（出参 meta） | 响应 | **实际**走了什么：`live` / `cache` / `mixed` |
 | `stale`（出参 meta） | 响应 | 结果是否为降级的近似值 |
 
-`window` 枚举：`1h` `6h` `24h` `7d` `30d`。
+`window` 枚举：`1h` `6h` `24h` `7d` `30d` `all`。
+`all` 表示不限时间——检索历史内容时需要它，把人锁在 30 天内会让几个月前的相关条目全看不见。
 
 **降级链**（现查类工具）：
 
@@ -272,6 +273,13 @@ live=false → 只读缓存 → mode=cache, stale=false（这是用户要的，�
 
 ### `read_article`
 
+**这是平台唯一按调用方给的地址出网的工具**，所以它有一道强制的地址校验：
+只接受指向公网的 http(s)，端口限于 80/443/8080/8443，且解析出的 IP 不能是
+私网、回环、链路本地或保留地址（云厂商的 `169.254.169.254` 元数据接口在此之列）。
+跟随重定向后会**重新校验一次**——否则「公网地址 302 到内网」就绕过了首次检查。
+被拒时统一回 `BAD_REQUEST`，且**不透露拒绝原因是「这是内网」**，那本身就是
+一条内网探测的反馈信号。
+
 **出参不是 Item**（修订 #3）：
 
 ```
@@ -299,7 +307,9 @@ live=false → 只读缓存 → mode=cache, stale=false（这是用户要的，�
 
 ```
 入参
-  window    enum    选填  默认 24h
+  q         string  选填  关键词，在标题与摘要里做子串匹配（v1.2.0 新增）
+  platform  string  选填  按具体信源过滤，如 openai / bilibili（v1.2.0 新增）
+  window    enum    选填  默认 24h；检索历史用 all
   category  string  选填  单个分类，匹配 Item.categories 中任一项
   source    string  选填  按 source.type 过滤
   since     string  选填  ISO8601，只返回 discovered_at > since 的条目（过滤条件）
@@ -307,6 +317,13 @@ live=false → 只读缓存 → mode=cache, stale=false（这是用户要的，�
   cursor    string  选填  分页位置
 出参 data: { items: Item[] }
 ```
+
+所有过滤条件是「与」的关系，可自由组合。
+
+**`q` 为什么是子串匹配而不是全文检索**：SQLite FTS5 的两种分词器对中文都不好使
+——`unicode61` 把整串中文当一个词（搜「旗舰」落不到「新一代旗舰模型」），
+`trigram` 又要求查询至少 3 个字符（搜「智谱」直接落空），而中文两字查询极常见。
+子串匹配对中文天然正确，代价是全表扫描；当前规模下是亚毫秒级。
 
 `since` 与 `cursor` 正交（修订 #4）：`since` 是「要哪些数据」，`cursor` 是「翻到第几页」。
 AIRADAR 做增量拉取时，首次请求带 `since`，后续翻页带 `cursor` **并保持 `since` 不变**。

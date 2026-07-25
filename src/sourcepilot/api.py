@@ -15,16 +15,19 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import __version__
+from .article import ArticleService
 from .collector import Collector, Scheduler
 from .contracts import (
     API_PREFIX,
     CONTRACT_VERSION,
     HTTP_STATUS,
+    Article,
     Envelope,
     ErrorCode,
     GetFeedParams,
     GetHotlistParams,
     ItemsPayload,
+    ReadArticleParams,
     SourcePilotError,
 )
 from .services import FeedService, HotlistService
@@ -47,6 +50,7 @@ def create_app(
     collector = Collector(store, sources)
     hotlist = HotlistService(collector)
     feed = FeedService(store)
+    article = ArticleService()
     background = Scheduler(collector)
 
     @asynccontextmanager
@@ -151,8 +155,21 @@ def create_app(
     async def get_feed(
         params: Annotated[GetFeedParams, Query()],
     ) -> Envelope[ItemsPayload]:
-        """归一化信息流（缓存），喂 AIRADAR。since 做增量，cursor 做分页，可同时用。"""
+        """归一化信息流（缓存），喂 AIRADAR。
+
+        q 关键词检索、platform 按信源过滤、since 做增量、cursor 做分页，可组合。
+        """
         return feed.get(params)
+
+    @app.get(f"{API_PREFIX}/article", tags=["tools"], summary="read_article")
+    async def read_article(
+        params: Annotated[ReadArticleParams, Query()],
+    ) -> Envelope[Article]:
+        """读单篇已知 URL 的正文，转 Markdown（现查，不缓存）。
+
+        只接受指向公网的 http(s) 地址——这是平台唯一按调用方给的地址出网的工具。
+        """
+        return article.get(params)
 
     return app
 

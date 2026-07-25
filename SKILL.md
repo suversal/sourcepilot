@@ -18,7 +18,9 @@ description: 查询 AI 厂商官方发布与多平台科技热榜。当用户问
 | 用户说的话 | 你要调的 |
 |---|---|
 | 「各家 AI 厂商最近发布了什么」「有什么新模型」 | `GET BASE/api/v1/items?source=vendor&window=30d` |
-| 「OpenAI / Anthropic / DeepSeek / 智谱 最近有什么动静」 | `GET BASE/api/v1/items?source=vendor&window=30d`，拿到后按 `source.platform` 筛 |
+| 「OpenAI 最近有什么新闻」（指名某一家） | `GET BASE/api/v1/items?platform=openai&window=30d` |
+| 「关于 Sora / Claude Code / 某话题的消息」 | `GET BASE/api/v1/items?q=Sora&window=all` |
+| 「展开讲讲第 N 条」「这篇说了什么」 | `GET BASE/api/v1/article?url=<该条的 url>` |
 | 「现在有什么热点」「热榜」「大家在聊什么」 | `GET BASE/api/v1/hotlist` |
 | 「B站/掘金/HN/GitHub 上什么最热」 | `GET BASE/api/v1/hotlist?platform=bilibili` |
 | 「今天有什么事」「过去 24 小时」 | `GET BASE/api/v1/items?window=24h` |
@@ -26,18 +28,35 @@ description: 查询 AI 厂商官方发布与多平台科技热榜。当用户问
 | 「有什么新产品发布」 | `GET BASE/api/v1/items?window=7d&category=product` |
 | 「这些源还活着吗」「采集正常吗」 | `GET BASE/api/v1/health` |
 
+`q` 做关键词检索（标题 + 摘要，中文直接按字符匹配，不用分词）。
+`platform` 指定单个信源，取值见 `/health`。
 `source` 可选值：`vendor`（厂商官方发布）、`hotlist`（平台热榜）。
 厂商官方发布覆盖：OpenAI · Anthropic · DeepSeek · 智谱 GLM · Kimi · 通义千问 ·
 字节 Seed · Google AI。它们是**一手信息**，比热榜上的二手讨论更可靠。
 
 `platform` 可选值以 `/api/v1/health` 返回的为准。
 `category` 可选值：`model` `product` `paper` `industry` `tip`。
-`window` 可选值：`1h` `6h` `24h` `7d` `30d`。
+`window` 可选值：`1h` `6h` `24h` `7d` `30d` `all`。
 
 **厂商发布用 30d 窗口**：官方发布本来就稀疏，24h 里经常一条都没有。
+**检索历史话题用 `window=all`**：问「关于 Sora 的消息」时限定 30 天，
+会让几个月前的相关条目一条都看不到。
 
-**不要猜端点。** 上表没有的能力（搜 X、读单篇正文、公众号）目前还没上线，
+**不要猜端点。** 上表没有的能力（现场搜 X、公众号）目前还没上线，
 直接告诉用户「这个信源还没接」，不要编一个 URL 去试，也不要改用别的来源冒充。
+
+## 摘要不全时怎么办
+
+约 76% 的条目有摘要，但**头条、IT之家、掘金、Hacker News、36氪、DeepSeek、
+LINUX DO、字节 Seed 这几个源只有标题**——它们的列表页就不提供描述。
+
+碰到用户想了解某条的内容而该条 `summary` 为空时：
+
+1. 用 `read_article` 取那一条的正文（传它自带的 `url`）。
+2. **只对用户真正关心的那一两条取**，不要为了「让简报好看」批量拉正文——
+   那会给对方站点造成不必要的压力，也慢。
+3. 取不到正文（有些站点是纯前端渲染）就如实说「这条只有标题」，
+   不要根据标题编内容。
 
 ---
 

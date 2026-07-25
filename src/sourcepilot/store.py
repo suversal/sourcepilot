@@ -165,6 +165,7 @@ class Store:
         platforms: Sequence[str] | None = None,
         source_type: SourceType | None = None,
         category: Category | None = None,
+        q: str | None = None,
         since: datetime | None = None,
         published_after: datetime | None = None,
         limit: int = 50,
@@ -183,6 +184,14 @@ class Store:
         if category is not None:
             where.append("categories LIKE ?")
             args.append(f'%"{category.value}"%')
+        if q:
+            # 子串匹配而不是 FTS5：FTS5 的两种分词器对中文都不好使——unicode61 把
+            # 整串中文当一个词（搜「旗舰」落不到「新一代旗舰模型」），trigram 又要求
+            # 查询至少 3 个字符（搜「智谱」直接落空），而中文两字查询极常见。
+            # 现阶段全表扫描是亚毫秒级；等条目上十万再换方案（可考虑 jieba 分词 + FTS5）。
+            where.append("(title LIKE ? OR summary LIKE ?)")
+            like = f"%{q}%"
+            args.extend([like, like])
         if since is not None:
             # 增量同步：问的是「上次拉取之后我们又收到了什么」，所以看收录时间。
             where.append("discovered_at > ?")

@@ -104,12 +104,15 @@ class FeedService:
     def get(self, params: GetFeedParams) -> Envelope[ItemsPayload]:
         started = time.perf_counter()
         now = datetime.now(UTC)
-        window_start = now - timedelta(seconds=WINDOW_SECONDS[params.window])
+        span = WINDOW_SECONDS[params.window]
+        window_start = None if span is None else now - timedelta(seconds=span)
 
         # 多取一条用来判断 has_more，返回前砍掉。
         rows = self.store.query_items(
             source_type=params.source,
+            platforms=[params.platform] if params.platform else None,
             category=params.category,
+            q=params.q,
             since=params.since,
             published_after=window_start,
             limit=params.limit + 1,

@@ -211,3 +211,55 @@ class TestMetaEndpoints:
         states = {s["name"]: s for s in client.get("/api/v1/health").json()["sources"]}
         assert states["fake"]["last_error_code"] == "UPSTREAM_DOWN"
         assert states["fake"]["consecutive_failures"] == 1
+
+
+class TestSearch:
+    """检索是 skill 从「能用」到「好用」的分水岭——没有它只能问「最近有啥」。"""
+
+    def test_keyword_matches_title(self, client):
+        client.get("/api/v1/hotlist")
+        body = client.get(
+            "/api/v1/items", params={"q": "大模型", "window": "all"}
+        ).json()
+        titles = {i["title"] for i in body["data"]["items"]}
+        assert titles == {"某大模型发布新版本"}, "只该返回命中关键词的那条"
+
+    def test_keyword_matches_summary(self, client):
+        client.get("/api/v1/hotlist")
+        body = client.get("/api/v1/items", params={"q": "官方摘要", "window": "all"}).json()
+        assert body["data"]["items"], "摘要里的词也该能搜到"
+
+    def test_chinese_substring_works_without_tokenizer(self, client):
+        """中文两字查询极常见，FTS5 的分词器都处理不好，所以用子串匹配。"""
+        client.get("/api/v1/hotlist")
+        body = client.get("/api/v1/items", params={"q": "模型", "window": "all"}).json()
+        assert body["data"]["items"]
+
+    def test_no_match_returns_empty_not_error(self, client):
+        body = client.get("/api/v1/items", params={"q": "绝不会出现的词"}).json()
+        assert body["ok"] is True and body["data"]["items"] == []
+
+    def test_platform_filter(self, client):
+        client.get("/api/v1/hotlist")
+        body = client.get(
+            "/api/v1/items", params={"platform": "other", "window": "all"}
+        ).json()
+        platforms = {i["source"]["platform"] for i in body["data"]["items"]}
+        assert platforms == {"other"}
+
+    def test_window_all_lifts_the_time_limit(self, client, store):
+        """检索历史内容时把人锁在 30 天内，会让几个月前的相关条目全看不见。"""
+        client.get("/api/v1/hotlist")
+        with store._conn() as conn:
+            conn.execute("UPDATE items SET effective_at = '2025-01-01T00:00:00Z'")
+        assert client.get("/api/v1/items", params={"window": "30d"}).json()["data"]["items"] == []
+        assert client.get("/api/v1/items", params={"window": "all"}).json()["data"]["items"]
+
+    def test_filters_combine(self, client):
+        client.get("/api/v1/hotlist")
+        body = client.get(
+            "/api/v1/items",
+            params={"q": "大模型", "platform": "fake", "window": "all"},
+        ).json()
+        items = body["data"]["items"]
+        assert len(items) == 1 and items[0]["source"]["platform"] == "fake"

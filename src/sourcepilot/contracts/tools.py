@@ -21,14 +21,18 @@ class Window(StrEnum):
     H24 = "24h"
     D7 = "7d"
     D30 = "30d"
+    #: 不限时间。检索场景需要它——问「关于 Sora 的消息」时把人锁在 30 天内，
+    #: 会让库里几个月前的相关条目一条都看不到。
+    ALL = "all"
 
 
-WINDOW_SECONDS: dict[Window, int] = {
+WINDOW_SECONDS: dict[Window, int | None] = {
     Window.H1: 3600,
     Window.H6: 6 * 3600,
     Window.H24: 24 * 3600,
     Window.D7: 7 * 86400,
     Window.D30: 30 * 86400,
+    Window.ALL: None,  # None = 不加时间下限
 }
 
 
@@ -84,6 +88,16 @@ class ReadArticleParams(_Params):
 class GetFeedParams(Paginated):
     """喂 AIRADAR。`since` 是过滤条件，`cursor` 是分页位置，两者正交。"""
 
+    q: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="关键词，在标题与摘要里做子串匹配（对中文按字符匹配，无需分词）",
+    )
+    platform: str | None = Field(
+        default=None,
+        description="按具体信源过滤，如 openai / anthropic / bilibili；取值见 /health",
+    )
     window: Window = Window.H24
     category: Category | None = Field(
         default=None, description="匹配 Item.categories 中任一项"
