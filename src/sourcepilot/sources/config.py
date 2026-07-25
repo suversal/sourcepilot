@@ -19,25 +19,36 @@ from ..settings import DEFAULT_UA, SOURCES_DIR
 class FieldSpec(BaseModel):
     """一个字段怎么从原始条目里取出来。
 
-    三种写法：
-      title: title                              # 直接取路径
-      url:   { template: "…/{bvid}" }           # 用其它字段拼
+    JSON / RSS 用 path，HTML 用 select，三种格式都能用 template 拼：
+      title: title                              # 取路径（JSON/RSS）
+      title: { select: "a.t" }                  # 取选中元素的文本（HTML）
+      url:   { select: "a.t", attr: href }      # 取选中元素的属性（HTML）
+      url:   { template: "{base_url}{path}" }   # 用已抽出的字段拼
       time:  { path: pubdate, type: unix }      # 取路径并转类型
     """
 
     model_config = ConfigDict(extra="forbid")
 
     path: str | None = None
+    select: str | None = Field(
+        default=None, description="CSS 选择器，相对当前行；'.' 表示行元素自身"
+    )
+    attr: str | None = Field(
+        default=None, description="配合 select：取该属性；不给则取文本"
+    )
     template: str | None = Field(
-        default=None, description="用 {字段路径} 占位；可加 |urlencode"
+        default=None, description="用 {字段名或路径} 占位；可加 |urlencode"
     )
     type: Literal["str", "int", "float", "unix", "iso"] = "str"
     default: Any = None
 
     @model_validator(mode="after")
     def _need_one_source(self) -> FieldSpec:
-        if (self.path is None) == (self.template is None):
-            raise ValueError("path 与 template 必须且只能给一个")
+        given = [self.path is not None, self.select is not None, self.template is not None]
+        if sum(given) != 1:
+            raise ValueError("path / select / template 必须且只能给一个")
+        if self.attr is not None and self.select is None:
+            raise ValueError("attr 只能配合 select 使用")
         return self
 
 
@@ -57,6 +68,14 @@ class RequestSpec(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     json_body: dict[str, Any] | None = None
     timeout: float = 10.0
+    impersonate: str | None = Field(
+        default=None,
+        description=(
+            "TLS/JA3 指纹伪装档位（curl_cffi 的 impersonate 值，如 safari、chrome131）。"
+            "只在对方用 Cloudflare 拦 TLS 握手时才需要——换 UA 解决不了那种拦截。"
+            "哪个档位管用得实测，不同站点结论不同。"
+        ),
+    )
 
     def merged_headers(self) -> dict[str, str]:
         headers = {"User-Agent": DEFAULT_UA, **self.headers}
@@ -74,13 +93,23 @@ class PreRequestSpec(BaseModel):
 
 
 class ExtractSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    format: Literal["json"] = Field(
-        default="json", description="v1 只支持 JSON；HTML/CSS 提取待热榜扩容时再加"
+    format: Literal["json", "html", "rss"] = "json"
+    # 属性名不能叫 list——那会遮蔽内建 list，害得 pydantic 解析不了后面的类型注解。
+    # YAML 里仍然写 `list:`，靠别名对上。
+    rows: str = Field(
+        default="",
+        alias="list",
+        description="JSON：列表所在路径，空 = 根即列表；HTML：行的 CSS 选择器；RSS：忽略",
     )
-    list: str = Field(default="", description="列表所在路径，空 = 根就是列表")
-    fields: dict[str, FieldSpec]
+    fields: dict[str, FieldSpec] = Field(
+        default_factory=dict, description="RSS 有默认映射，可留空"
+    )
+    exclude_if: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="字段值命中任一关键词就丢弃该条，用于剔广告；如 {title: [优惠, 补贴]}",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -90,10 +119,25 @@ class ExtractSpec(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _need_required_fields(self) -> ExtractSpec:
+    def _check_shape(self) -> ExtractSpec:
+        if self.format == "rss":
+            # RSS 条目形状稳定，配置可以整个留空走默认映射。
+            return self
+
         missing = {"native_id", "title", "url"} - set(self.fields)
         if missing:
             raise ValueError(f"extract.fields 缺必填项：{sorted(missing)}")
+
+        if self.format == "html":
+            if not self.rows:
+                raise ValueError("format=html 必须给 extract.list（行的 CSS 选择器）")
+            bad = [k for k, v in self.fields.items() if v.path is not None]
+            if bad:
+                raise ValueError(f"format=html 的字段要用 select 而非 path：{sorted(bad)}")
+        else:
+            bad = [k for k, v in self.fields.items() if v.select is not None]
+            if bad:
+                raise ValueError(f"format=json 的字段要用 path 而非 select：{sorted(bad)}")
         return self
 
 
@@ -109,6 +153,9 @@ class SourceConfig(BaseModel):
         default=300, ge=120, description="自适应抓取间隔下限（秒），最短 2 分钟"
     )
     lang: str | None = None
+    base_url: str = Field(
+        default="", description="站点根地址；模板里用 {base_url} 把相对链接拼成绝对链接"
+    )
     categories: list[str] = Field(
         default_factory=list, description="源级分类，无条件打在该源所有条目上"
     )

@@ -1,0 +1,22 @@
+name: ithome
+display_name: IT之家
+type: hotlist
+platform: ithome
+enabled: true
+min_interval: 300
+lang: zh
+
+request:
+  url: https://www.ithome.com/list/
+
+extract:
+  format: html
+  list: "#list > div.fl > ul > li"
+  fields:
+    native_id: { select: "a.t", attr: href }
+    title: { select: "a.t" }
+    url: { select: "a.t", attr: href }
+  # 列表里混着推广位，newsnow 也是靠关键词剔的。
+  exclude_if:
+    title: [神券, 优惠, 补贴, 京东]
+    url: [lapin]

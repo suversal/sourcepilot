@@ -1,0 +1,13 @@
+name: pcbeta
+display_name: 远景论坛 Win11
+type: hotlist
+platform: pcbeta
+enabled: true
+min_interval: 900
+lang: zh
+
+request:
+  url: https://bbs.pcbeta.com/forum.php?mod=rss&fid=563&auth=0
+
+extract:
+  format: rss

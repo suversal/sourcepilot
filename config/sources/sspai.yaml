@@ -1,0 +1,24 @@
+name: sspai
+display_name: 少数派热门文章
+type: hotlist
+platform: sspai
+enabled: true
+min_interval: 900
+lang: zh
+categories: [tip]
+
+request:
+  # tag=热门文章（URL 编码后即 %E7%83%AD%E9%97%A8%E6%96%87%E7%AB%A0）
+  url: https://sspai.com/api/v1/article/tag/page/get?limit=30&offset=0&released=false&tag=%E7%83%AD%E9%97%A8%E6%96%87%E7%AB%A0
+
+extract:
+  format: json
+  list: data
+  fields:
+    native_id: { path: id, type: int }
+    title: title
+    url: { template: "https://sspai.com/post/{id}" }
+    summary: summary
+    author: author.nickname
+    published_at: { path: released_time, type: unix }
+    score_raw: { path: like_count, type: int }

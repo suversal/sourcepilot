@@ -1,0 +1,16 @@
+# newsnow 优先走 GraphQL API，但那需要 PRODUCTHUNT_API_TOKEN。
+# 本平台对外匿名只读、不索要 Key，所以直接用它的公开 RSS（newsnow 的降级路径）。
+name: producthunt
+display_name: Product Hunt
+type: hotlist
+platform: producthunt
+enabled: true
+min_interval: 1800
+lang: en
+categories: [product]
+
+request:
+  url: https://www.producthunt.com/feed
+
+extract:
+  format: rss

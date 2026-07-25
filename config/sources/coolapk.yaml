@@ -1,0 +1,21 @@
+# 已禁用。酷安要求带签名请求头（newsnow 的 coolapk/utils.ts 里用设备参数 +
+# token 算 X-App-Token）。那属于「重逻辑单写」的范畴，不该塞进声明式配置——
+# 等 X 后端把签名那套基础设施做出来之后，用同一套机制接。
+name: coolapk
+display_name: 酷安今日热门
+type: hotlist
+platform: coolapk
+enabled: false
+min_interval: 600
+lang: zh
+
+request:
+  url: https://api.coolapk.com/v6/page/dataList?url=%2Ffeed%2FstatList%3FcacheExpires%3D300%26statType%3Dday%26sortField%3Ddetailnum%26title%3D%E4%BB%8A%E6%97%A5%E7%83%AD%E9%97%A8&title=%E4%BB%8A%E6%97%A5%E7%83%AD%E9%97%A8&page=1
+
+extract:
+  format: json
+  list: data
+  fields:
+    native_id: id
+    title: editor_title
+    url: { template: "https://www.coolapk.com{url}" }

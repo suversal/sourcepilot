@@ -30,14 +30,14 @@ class TestExtract:
         assert resolve_path({"a": 1}, "zzz") is None
 
     def test_template_fills_from_row(self):
-        assert render_template("x/{id}", {"id": 7}) == "x/7"
+        assert render_template("x/{id}", row={"id": 7}) == "x/7"
 
     def test_template_urlencodes(self):
-        assert render_template("q={w|urlencode}", {"w": "a b&c"}) == "q=a%20b%26c"
+        assert render_template("q={w|urlencode}", row={"w": "a b&c"}) == "q=a%20b%26c"
 
     def test_template_missing_slot_yields_none(self):
         """拼不出完整 URL 时返回 None，好过给出一个半截的坏链接。"""
-        assert render_template("x/{id}", {"other": 1}) is None
+        assert render_template("x/{id}", row={"other": 1}) is None
 
     def test_coerce_unix_seconds_and_millis(self):
         assert coerce(1784711789, "unix") == datetime(2026, 7, 22, 9, 16, 29, tzinfo=UTC)
@@ -128,7 +128,7 @@ class TestConfigValidation:
             **bad["extract"],
             "fields": {**bad["extract"]["fields"], "title": {}},
         }
-        with pytest.raises(ValidationError, match="path 与 template"):
+        with pytest.raises(ValidationError, match="path / select / template"):
             SourceConfig(**bad)
 
     def test_required_fields_enforced(self):

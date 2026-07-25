@@ -11,6 +11,10 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "httpx>=0.27",
     "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",   # HTML 源的 CSS 选择器提取
+    "lxml>=5.0",              # bs4 的解析后端
+    "feedparser>=6.0",        # RSS/Atom 源
+    "curl_cffi>=0.7",         # TLS 指纹伪装，对付 Cloudflare 挑战页
 ]
 
 [project.optional-dependencies]

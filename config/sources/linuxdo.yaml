@@ -1,0 +1,28 @@
+# LINUX DO 挂在 Cloudflare 后面，返回「Just a moment...」挑战页。
+# 换 UA、补全套浏览器头、先访问首页拿 cookie 都过不去——它拦的是 TLS 握手指纹。
+# 实测（2026-07-25）：impersonate=chrome / chrome131 仍被 403，safari 能过。
+# 对方调整策略时改这一行，不动代码。
+name: linuxdo
+display_name: LINUX DO 今日热门
+type: hotlist
+platform: linuxdo
+enabled: true
+min_interval: 600
+lang: zh
+categories: [tip]
+
+request:
+  url: https://linux.do/top/daily.json
+  impersonate: safari
+
+extract:
+  format: json
+  list: topic_list.topics
+  fields:
+    native_id: { path: id, type: int }
+    title: title
+    url: { template: "https://linux.do/t/topic/{id}" }
+    summary: excerpt
+    author: last_poster_username
+    published_at: { path: created_at, type: iso }
+    score_raw: { path: like_count, type: int }

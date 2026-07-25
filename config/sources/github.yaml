@@ -1,0 +1,21 @@
+name: github
+display_name: GitHub Trending
+type: hotlist
+platform: github
+enabled: true
+min_interval: 1800
+lang: en
+base_url: https://github.com
+
+request:
+  url: https://github.com/trending?spoken_language_code=
+
+extract:
+  format: html
+  list: main .Box div[data-hpc] > article
+  fields:
+    native_id: { select: "h2 a", attr: href }
+    title: { select: "h2 a" }
+    url: { select: "h2 a", attr: href }
+    summary: { select: "p" }
+    score_raw: { select: "[href$=stargazers]" }

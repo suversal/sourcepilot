@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import feedparser
 import httpx
+from bs4 import BeautifulSoup
 
 from ..categorize import get_categorizer
 from ..contracts import (
@@ -25,8 +27,8 @@ from ..contracts import (
     Timeout,
     UpstreamDown,
 )
-from .config import SourceConfig
-from .extract import extract_field, resolve_path
+from .config import FieldSpec, SourceConfig
+from .extract import extract_row, resolve_path
 
 #: 追踪参数。不清掉的话，同一条内容会因为埋点串不同而躲过跨源去重。
 TRACKING_PARAMS = frozenset(
@@ -51,7 +53,30 @@ def normalize_url(url: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(kept)))
 
 
-def _classify_http_error(response: httpx.Response) -> SourcePilotError:
+def _fetch_impersonated(config: SourceConfig) -> Any:
+    """走 curl_cffi，在 TLS 层伪装成真实浏览器。
+
+    对付 Cloudflare 那种「Just a moment...」挑战——它拦的是 TLS 握手指纹，
+    改 UA 或补请求头都没用。代价是这条路不共用 httpx 连接池。
+    """
+    from curl_cffi import requests as curl_requests
+
+    try:
+        return curl_requests.request(
+            config.request.method,
+            config.request.url,
+            headers=config.request.merged_headers(),
+            json=config.request.json_body,
+            timeout=config.request.timeout,
+            impersonate=config.request.impersonate,
+        )
+    except Exception as exc:  # curl_cffi 的异常类型随版本变，统一按上游不可达处理
+        if "timed out" in str(exc).lower():
+            raise Timeout(f"{config.name} 请求超时") from exc
+        raise UpstreamDown(f"{config.name} 连接失败：{type(exc).__name__}") from exc
+
+
+def _classify_http_error(response: Any) -> SourcePilotError:
     """把 HTTP 现象翻成结构化错误码，让上层能分支决策。"""
     status = response.status_code
     body = response.text[:2000].lower()
@@ -86,40 +111,119 @@ def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
             except httpx.HTTPError:
                 pass
 
-        try:
-            response = client.request(
-                config.request.method,
-                config.request.url,
-                headers=config.request.merged_headers(),
-                json=config.request.json_body,
-                timeout=config.request.timeout,
-            )
-        except httpx.TimeoutException as exc:
-            raise Timeout(f"{config.name} 请求超时") from exc
-        except httpx.HTTPError as exc:
-            raise UpstreamDown(f"{config.name} 连接失败：{type(exc).__name__}") from exc
+        if config.request.impersonate:
+            response = _fetch_impersonated(config)
+        else:
+            try:
+                response = client.request(
+                    config.request.method,
+                    config.request.url,
+                    headers=config.request.merged_headers(),
+                    json=config.request.json_body,
+                    timeout=config.request.timeout,
+                )
+            except httpx.TimeoutException as exc:
+                raise Timeout(f"{config.name} 请求超时") from exc
+            except httpx.HTTPError as exc:
+                raise UpstreamDown(f"{config.name} 连接失败：{type(exc).__name__}") from exc
 
         if response.status_code != 200:
             raise _classify_http_error(response)
 
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise UpstreamDown(f"{config.name} 返回的不是合法 JSON") from exc
+        if config.extract.format == "json":
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise UpstreamDown(f"{config.name} 返回的不是合法 JSON") from exc
+        return response.text
     finally:
         if owns_client:
             client.close()
 
 
-def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None) -> list[Item]:
-    """把原始 JSON 转成统一 Item。单条坏了就跳过，不拖垮整源。"""
-    now = now or datetime.now(UTC)
-    rows = resolve_path(payload, config.extract.list)
+def _rss_entries(text: str, config: SourceConfig) -> list[dict[str, Any]]:
+    """把 RSS/Atom 条目压成普通 dict，之后就能走 JSON 那套取值逻辑。"""
+    feed = feedparser.parse(text)
+    if feed.bozo and not feed.entries:
+        raise UpstreamDown(f"{config.name} 的 RSS 解析失败：{feed.bozo_exception}")
+
+    rows: list[dict[str, Any]] = []
+    for entry in feed.entries:
+        published = None
+        for key in ("published_parsed", "updated_parsed"):
+            parsed = entry.get(key)
+            if parsed:
+                published = datetime(*parsed[:6], tzinfo=UTC).isoformat()
+                break
+        summary = entry.get("summary")
+        if summary:
+            summary = BeautifulSoup(summary, "html.parser").get_text(" ", strip=True)
+        rows.append(
+            {
+                "id": entry.get("id") or entry.get("link"),
+                "title": entry.get("title"),
+                "link": entry.get("link"),
+                "summary": (summary or None),
+                "author": entry.get("author"),
+                "published": published,
+            }
+        )
+    return rows
+
+
+#: RSS 条目形状稳定，配置不写 fields 就用这套默认映射。
+RSS_DEFAULT_FIELDS: dict[str, FieldSpec] = {
+    "native_id": FieldSpec(path="id"),
+    "title": FieldSpec(path="title"),
+    "url": FieldSpec(path="link"),
+    "summary": FieldSpec(path="summary"),
+    "author": FieldSpec(path="author"),
+    "published_at": FieldSpec(path="published", type="iso"),
+}
+
+
+def _rows_and_fields(
+    config: SourceConfig, payload: Any
+) -> tuple[list[Any], dict[str, FieldSpec]]:
+    """按格式取出「行」的列表与本次要用的字段定义。"""
+    spec = config.extract
+
+    if spec.format == "rss":
+        return _rss_entries(payload, config), (spec.fields or RSS_DEFAULT_FIELDS)
+
+    if spec.format == "html":
+        soup = BeautifulSoup(payload, "lxml")
+        rows = soup.select(spec.rows)
+        if not rows:
+            raise UpstreamDown(
+                f"{config.name} 的选择器 {spec.rows!r} 一个元素都没选中"
+                f"——多半是对方改版了"
+            )
+        return rows, spec.fields
+
+    rows = resolve_path(payload, spec.rows)
     if not isinstance(rows, list):
         raise UpstreamDown(
-            f"{config.name} 的 extract.list={config.extract.list!r} 没取到列表"
+            f"{config.name} 的 extract.list={spec.rows!r} 没取到列表"
             f"（拿到 {type(rows).__name__}）——多半是对方改版了"
         )
+    return rows, spec.fields
+
+
+def _is_excluded(config: SourceConfig, fields: dict[str, Any]) -> bool:
+    """按配置的关键词丢弃条目（IT之家那种混在列表里的广告）。"""
+    for key, words in config.extract.exclude_if.items():
+        value = fields.get(key)
+        if isinstance(value, str) and any(w in value for w in words):
+            return True
+    return False
+
+
+def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None) -> list[Item]:
+    """把原始响应转成统一 Item。单条坏了就跳过，不拖垮整源。"""
+    now = now or datetime.now(UTC)
+    rows, field_specs = _rows_and_fields(config, payload)
+    is_html = config.extract.format == "html"
 
     source = Source(type=config.type, name=config.display_name, platform=config.platform)
     categorizer = get_categorizer()
@@ -128,11 +232,13 @@ def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None
 
     for rank, row in enumerate(rows):
         try:
-            fields = {
-                key: extract_field(row, spec) for key, spec in config.extract.fields.items()
-            }
+            fields = extract_row(
+                row, field_specs, is_html=is_html, base_url=config.base_url
+            )
             native_id, title, url = fields.get("native_id"), fields.get("title"), fields.get("url")
             if not native_id or not title or not url:
+                continue
+            if _is_excluded(config, fields):
                 continue
 
             published_at = fields.get("published_at")

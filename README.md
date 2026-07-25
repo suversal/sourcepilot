@@ -19,12 +19,21 @@
 
 ## 状态
 
-契约已冻结，热榜链路端到端跑通（4 源 / 3 端点），X 后端未开始。
+契约已冻结，热榜链路端到端跑通（14 源 / 3 端点），X 后端未开始。
 
 已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/health`。
-已接信源：B站排行榜、今日头条热榜、V2EX 最热、掘金后端热榜。
 契约里的 `search_x` / `get_x_timeline` / `get_wechat_feed` / `read_article` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
+
+已接信源（14 个，含 newsnow 科技分类全量）：
+
+| 格式 | 信源 |
+|---|---|
+| JSON | B站排行榜 · 今日头条 · V2EX · 掘金 · 少数派 · LINUX DO · AIHOT |
+| HTML | 36氪快讯 · GitHub Trending · Hacker News · IT之家 |
+| RSS | Solidot · Product Hunt · 远景论坛 |
+
+未启用：微博（需匿名 cookie）、酷安（需签名请求头）——配置在仓库里，禁用理由写在各自文件头。
 
 阶段进度、待办与已知问题见 **[docs/progress.md](docs/progress.md)**。
 
@@ -46,7 +55,9 @@ curl -s "http://127.0.0.1:8000/api/v1/hotlist?limit=5" | python3 -m json.tool
 
 ## 加一个热榜源
 
-写个 YAML 丢进 `config/sources/`，不用改代码：
+写个 YAML 丢进 `config/sources/`，不用改代码。三种格式：
+
+**JSON** — 点分路径取值，`{}` 模板拼 URL：
 
 ```yaml
 name: example
@@ -63,6 +74,32 @@ extract:
     url: { template: "https://example.com/p/{id}" }
     published_at: { path: ctime, type: unix }
 ```
+
+**HTML** — `list` 是行的 CSS 选择器，字段用 `select` 取文本或属性：
+
+```yaml
+base_url: https://example.com    # 相对链接会自动拼成绝对链接
+extract:
+  format: html
+  list: "#list > ul > li"
+  fields:
+    native_id: { select: "a.t", attr: href }
+    title: { select: "a.t" }
+    url: { select: "a.t", attr: href }
+  exclude_if:
+    title: [优惠, 补贴]          # 标题命中就丢弃，用来剔列表里的推广位
+```
+
+**RSS** — 条目形状固定，`fields` 整个可以不写：
+
+```yaml
+extract:
+  format: rss
+```
+
+两个可选的反爬字段：`pre_request` 先空跑一个请求领访客 cookie；
+`request.impersonate` 走 TLS 指纹伪装（对方用 Cloudflare 拦握手时才需要，
+换 UA 解决不了那种拦截，哪个档位管用得实测）。
 
 `min_interval` 是该源的自适应抓取间隔下限（最短 2 分钟），到点才会重新抓，
 其余请求直接走缓存。

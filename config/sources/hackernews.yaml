@@ -1,0 +1,20 @@
+name: hackernews
+display_name: Hacker News
+type: hotlist
+platform: hackernews
+enabled: true
+min_interval: 600
+lang: en
+base_url: https://news.ycombinator.com/
+categories: [industry]
+
+request:
+  url: https://news.ycombinator.com/
+
+extract:
+  format: html
+  list: .athing
+  fields:
+    native_id: { select: ".", attr: id }
+    title: { select: ".titleline a" }
+    url: { template: "{base_url}item?id={native_id}" }

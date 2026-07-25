@@ -1,7 +1,8 @@
-"""从原始 JSON 里按配置取值。
+"""从原始响应里按配置取值。三种格式共用一套字段定义。
 
-刻意做得很小：点分路径 + 数组下标 + 模板拼接，够热榜用。
-需要更强的表达力时再换 jsonpath，不提前上依赖。
+- JSON：点分路径 + 数组下标。刻意不上 jsonpath，够热榜用就行。
+- HTML：CSS 选择器（相对当前行），取文本或属性。
+- RSS ：先把条目压成普通 dict，再走 JSON 那条路——这样只有一套取值逻辑。
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 from .config import FieldSpec
 
@@ -36,15 +37,49 @@ def resolve_path(data: Any, path: str) -> Any:
     return cur
 
 
-def render_template(template: str, row: Any) -> str | None:
-    """`https://…/{bvid}` → 用行内字段填空。支持 `{path|urlencode}`。"""
+def select_html(row: Any, spec: FieldSpec) -> str | None:
+    """按 CSS 选择器从行元素里取文本或属性。`select: "."` 表示行元素自身。"""
+    target = row if spec.select in (".", "") else row.select_one(spec.select or "")
+    if target is None:
+        return None
+    if spec.attr:
+        value = target.get(spec.attr)
+        if isinstance(value, list):  # class 之类的多值属性
+            value = " ".join(value)
+        return value
+    return re.sub(r"\s+", " ", target.get_text(" ", strip=True)).strip() or None
+
+
+def render_template(
+    template: str,
+    *,
+    row: Any = None,
+    extracted: dict[str, Any] | None = None,
+    base_url: str = "",
+) -> str | None:
+    """`{base_url}{href}` → 填空。
+
+    取值顺序：已抽出的字段 → base_url → 原始行的 JSON 路径。
+    任一占位取不到就整体返回 None——半截 URL 比没有 URL 更糟。
+    """
+    extracted = extracted or {}
     missing = False
 
     def sub(match: re.Match[str]) -> str:
         nonlocal missing
         expr = match.group(1)
-        path, _, filt = expr.partition("|")
-        value = resolve_path(row, path.strip())
+        key, _, filt = expr.partition("|")
+        key = key.strip()
+
+        if key in extracted and extracted[key] is not None:
+            value = extracted[key]
+        elif key == "base_url":
+            value = base_url
+        elif isinstance(row, dict | list):
+            value = resolve_path(row, key)
+        else:
+            value = None
+
         if value is None:
             missing = True
             return ""
@@ -81,11 +116,33 @@ def coerce(value: Any, kind: str) -> Any:
     return None
 
 
-def extract_field(row: Any, spec: FieldSpec) -> Any:
-    raw = (
-        render_template(spec.template, row)
-        if spec.template is not None
-        else resolve_path(row, spec.path or "")
-    )
-    value = coerce(raw, spec.type)
-    return spec.default if value is None else value
+def extract_row(
+    row: Any,
+    fields: dict[str, FieldSpec],
+    *,
+    is_html: bool,
+    base_url: str = "",
+) -> dict[str, Any]:
+    """抽出一整行。先做 path/select，再做 template——模板才能引用前面的结果。"""
+    out: dict[str, Any] = {}
+
+    for key, spec in fields.items():
+        if spec.template is not None:
+            continue
+        raw = select_html(row, spec) if is_html else resolve_path(row, spec.path or "")
+        value = coerce(raw, spec.type)
+        out[key] = spec.default if value is None else value
+
+    for key, spec in fields.items():
+        if spec.template is None:
+            continue
+        raw = render_template(
+            spec.template, row=row, extracted=out, base_url=base_url
+        )
+        value = coerce(raw, spec.type)
+        out[key] = spec.default if value is None else value
+
+    # 相对链接补全：模板里已经拼过 base_url 的不受影响（urljoin 对绝对地址是幂等的）。
+    if base_url and isinstance(out.get("url"), str):
+        out["url"] = urljoin(base_url, out["url"])
+    return out

@@ -1,0 +1,15 @@
+# RSS 源：不写 fields 就走引擎的默认映射。
+name: solidot
+display_name: Solidot
+type: hotlist
+platform: solidot
+enabled: true
+min_interval: 900
+lang: zh
+categories: [industry]
+
+request:
+  url: https://www.solidot.org/index.rss
+
+extract:
+  format: rss

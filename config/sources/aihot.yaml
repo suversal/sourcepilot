@@ -1,0 +1,23 @@
+# AIHOT 是本项目的对标对象（见 CLAUDE.md），newsnow 也把它列在科技分类里。
+# 它是公开匿名只读 API，这里当普通信源接入。
+name: aihot
+display_name: AIHOT 中文 AI 资讯
+type: hotlist
+platform: aihot
+enabled: true
+min_interval: 600
+lang: zh
+categories: [model]
+
+request:
+  url: https://aihot.virxact.com/api/public/items?mode=all&take=30
+
+extract:
+  format: json
+  list: items
+  fields:
+    native_id: id
+    title: title
+    url: url
+    summary: summary
+    published_at: { path: publishedAt, type: iso }
