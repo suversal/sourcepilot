@@ -4,9 +4,6 @@
 降级路径——出口层看到的是同一种 Outcome，不因为后端不同而分叉。
 """
 
-from ..sources.engine import register_channel
-from .wechat import collect_wechat
+from . import wechat  # noqa: F401  导入即注册
 
-register_channel("wechat", collect_wechat)
-
-__all__ = ["collect_wechat"]
+__all__ = ["wechat"]

@@ -33,6 +33,12 @@ channel: wechat
 min_interval: 3600
 lang: zh
 
+# 后端降级链：按顺序试，前一个失败就换下一个。
+#   mp    公众平台——需凭据，数据最全、链接永久，但有账号风险
+#   sogou 搜狗——免凭据零风险，但链接是限时签名链接会过期，数据也差一档
+# 没配凭据时 mp 会被自动跳过（不算故障），直接走 sogou，所以这块开着也能出数据。
+backends: [mp, sogou]
+
 # 每个账号取多少条，以及账号之间的请求间隔（公众平台对连续请求很敏感）
 per_account_limit: 10
 account_interval: 3.0

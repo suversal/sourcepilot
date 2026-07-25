@@ -1,25 +1,25 @@
-"""公众号 channel。
+"""公众平台后端——**主力路线**，数据最全。
 
-**整块隔离**：这是全平台最可能被官方封掉的一条线（走的是公众平台后台接口，
-不是官方开放 API）。所以它自成一个模块，凭据、客户端、归一化都在这里；
-坏了就整块换掉，不牵动其它信源。
+- ✅ 能按公众号精确拉文章列表，链接是永久的 `mp.weixin.qq.com/s/...`
+- ⚠️ 必须有登录态：两个接口匿名请求一律回
+  `{"ret": 200003, "err_msg": "invalid session"}`（实测 2026-07-26）
+- ⚠️ 有账号风险：这是后台接口不是开放 API，抓太狠会被封。所以账号之间留间隔，
+  凭据一失效立刻停手交给降级链。
 
-**必须有登录态**：`mp.weixin.qq.com` 的两个接口匿名请求一律回
-`{"ret": 200003, "err_msg": "invalid session"}`。凭据由使用者自己扫码取得
-（见 `login.py`），本模块只负责读取和使用，从不索要、不记录明文到日志。
+凭据由使用者自己取得（浏览器里手动复制，或跑 login.py 扫码），
+本模块只负责读取和使用，从不索要、不记录明文到日志。
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import yaml
 
-from ..contracts import (
+from ...contracts import (
     AuthExpired,
     Item,
     RateLimited,
@@ -28,9 +28,8 @@ from ..contracts import (
     TimeBasis,
     UpstreamDown,
 )
-from ..settings import PROJECT_ROOT
-from ..sources.config import SourceConfig
-from ..sources.engine import normalize_url
+from ...settings import PROJECT_ROOT
+from ...sources.engine import normalize_url
 
 log = logging.getLogger("sourcepilot.channels.wechat")
 
@@ -170,43 +169,32 @@ def _to_item(article: dict[str, Any], account: str, now: datetime) -> Item | Non
         categories=[],
         lang="zh",
         media=[],
-        raw={"aid": aid},
+        raw={"aid": aid, "backend": "mp"},
     )
 
 
-def collect_wechat(config: SourceConfig) -> list[Item]:
-    """channel 入口。由 sources.engine.collect 按 `channel: wechat` 分派进来。"""
-    credentials = Credentials.load()
-    if credentials is None:
-        raise AuthExpired("公众号采集未配置")
+class MpBackend:
+    name = "mp"
+    needs_credentials = True
 
-    accounts = list(config.accounts or [])
-    if not accounts:
-        return []
+    def available(self) -> bool:
+        return Credentials.load() is not None
 
-    client = WechatClient(credentials)
-    now = datetime.now(UTC)
-    items: list[Item] = []
+    def fetch(self, account: str, limit: int) -> list[Item]:
+        credentials = Credentials.load()
+        if credentials is None:
+            raise AuthExpired("公众号采集未配置")
 
-    for name in accounts:
-        try:
-            found = client.search_account(name)
-            if not found or not found.get("fakeid"):
-                log.warning("公众号 %s 搜不到", name)
-                continue
-            for article in client.list_articles(found["fakeid"], config.per_account_limit):
-                item = _to_item(article, name, now)
-                if item is not None:
-                    items.append(item)
-        except AuthExpired:
-            raise  # 凭据失效是整块的事，不是单个账号的事
-        except RateLimited:
-            raise  # 被限流就停手，别继续捅
-        except Exception as exc:
-            # 单个公众号出问题不该拖垮整个 channel
-            log.warning("公众号 %s 采集失败：%s", name, type(exc).__name__)
-            continue
-        # 公众平台对连续请求很敏感，账号之间留间隔。
-        time.sleep(config.account_interval)
+        client = WechatClient(credentials)
+        now = datetime.now(UTC)
+        found = client.search_account(account)
+        if not found or not found.get("fakeid"):
+            log.warning("公众号 %s 搜不到", account)
+            return []
 
-    return items
+        items = []
+        for article in client.list_articles(found["fakeid"], limit):
+            item = _to_item(article, account, now)
+            if item is not None:
+                items.append(item)
+        return items

@@ -186,6 +186,13 @@ class SourceConfig(BaseModel):
         default_factory=list,
         description="channel 专用：要订阅的账号名列表（公众号 channel 用）",
     )
+    backends: list[str] = Field(
+        default_factory=list,
+        description=(
+            "channel 专用：后端降级链，按顺序试，前一个失败就换下一个。"
+            "留空则用 channel 自己的默认顺序。"
+        ),
+    )
     per_account_limit: int = Field(
         default=10, ge=1, le=50, description="channel 专用：每个账号取多少条"
     )
