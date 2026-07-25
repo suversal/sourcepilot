@@ -26,9 +26,8 @@
 契约里的 `search_x` / `get_x_timeline` 尚未实现，
 **没有占位端点**——没接的能力就是访问不到，不给假数据。
 
-公众号 channel 走**双后端降级链**：`mp`（公众平台，需凭据、数据最全、链接永久）
-→ `sogou`（搜狗，免凭据、零账号风险，但链接是限时签名链接会过期）。
-没配凭据时 mp 自动跳过，直接由 sogou 出数据。
+公众号 channel 走 `mp`（公众平台）后端，需自行配置凭据；没配时该源静默跳过，不影响其它信源。
+（另有免凭据的 `sogou` 后端，但实测数据陈旧、易触发验证码，默认不启用。）
 配凭据有两种方式：浏览器里登录后手动复制 token 与 cookie（推荐，无自动化痕迹），
 或跑 `python -m sourcepilot.channels.login` 扫码（建议用专用小号）。
 详见 [config/sources/wechat.yaml](config/sources/wechat.yaml) 文件头。

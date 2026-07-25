@@ -28,7 +28,7 @@ name: wechat
 display_name: 微信公众号
 type: wechat
 platform: wechat
-enabled: false
+enabled: true
 channel: wechat
 min_interval: 3600
 lang: zh
@@ -54,6 +54,6 @@ backends: [mp]
 per_account_limit: 10
 account_interval: 3.0
 
-accounts: []
-  # - 量子位
-  # - 机器之心
+accounts:
+  - 量子位
+  - 机器之心

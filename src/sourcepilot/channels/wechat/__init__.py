@@ -99,14 +99,14 @@ def collect_wechat(config: SourceConfig) -> list[Item]:
             break  # 这个号已经拿到了，不必再问后面的后端
 
     if not attempted_any:
-        # 一个后端都没能尝试：要么都没凭据，要么都在冷却里。这是配置或运维问题，
-        # 悄悄返回空会让人以为「这些号最近没发文章」。
         blocked = [b.name for b in backends if COOLDOWNS.blocked(b.name)]
-        raise AuthExpired(
-            f"公众号没有可用后端（冷却中：{', '.join(blocked) or '无'}）"
-            if blocked
-            else "公众号采集未配置"
-        )
+        if blocked:
+            # 全在冷却里是**故障**：说明刚刚被限流或凭据被拒了，得让人看见。
+            raise AuthExpired(f"公众号后端全在冷却中：{', '.join(blocked)}")
+        # 一个凭据都没配过是**配置状态**，不是故障。这样仓库默认开着也不会
+        # 让别人克隆下来就满屏报错；/health 里的 last_item_count=0 已经说明问题。
+        log.info("公众号未配置凭据，本轮跳过（配置见 config/sources/wechat.yaml）")
+        return []
     if not served_any and first_error is not None:
         # 所有后端都试过且都失败——把最先遇到的错误报上去，那是运维要修的东西。
         raise first_error

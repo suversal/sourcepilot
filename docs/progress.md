@@ -27,7 +27,7 @@
 | 3 | X 后端（签名/账号池/限流） | ⬜ 未开始 | — | — |
 | 4 | 可靠性层（Canary/故障转移/代理） | ⬜ 未开始 | — | — |
 | 5 | MCP 出口 | ⬜ 未开始 | — | — |
-| 6 | 迁 RSS + 公众号 channel | 🔶 部分完成 | RSS 提取器、公众号 channel（mp + sogou 双后端降级链 + 冷却状态机） | 25 项离线测试 + 搜狗后端真实跑通；**mp 后端仍未验证**（需凭据） |
+| 6 | 迁 RSS + 公众号 channel | ✅ 完成 | RSS 提取器、公众号 channel（mp 后端 + 冷却状态机）、`/api/v1/wechat/feed` | 27 项离线测试 + **真实凭据端到端跑通**：量子位/机器之心共 34 条入库 |
 
 第 2 步标 ⚠️ 而非 ✅ 的原因：**SKILL.md 从未在真实 Agent 上跑过**，
 「提问→查→中文简报」整条链路还只是纸面设计。见下方待办 T1。
@@ -38,7 +38,7 @@
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
 - `GET /api/v1/article` — 读单篇正文转 Markdown（现查，带 SSRF 防护）
-- `GET /api/v1/wechat/feed` — 订阅公众号最新文章（缓存，需自行扫码授权）
+- `GET /api/v1/wechat/feed` — 订阅公众号最新文章（缓存，需自行配置凭据）
 
 已接信源 22 个，分两类：
 
@@ -103,7 +103,8 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
 | **搜狗兜不住，已降为可选** | 实测各取 10 条：量子位只出 2 条(含 2019 年的)、机器之心 9 条全是 2017 年、新智元第三个号就撞验证码；`sortType=1&tsn=1` 按时间排序返回 0 条。根因是它给的是按相关性排的搜索结果而非时间流，且每条要额外请求还原跳转 | 默认 `backends: [mp]`。代码保留但不默认启用——静默返回 2017 年文章的兜底比没有兜底更危险 |
 | 搜狗给的是限时链接 | 还原出的 `mp.weixin.qq.com/s?src=11&timestamp=…&signature=…` 几小时到一天后失效 | 条目 `raw.link_expires=true` 标注。这是降级路线的固有代价，主力（公众平台）给的是永久链接 |
-| 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | 多后端降级链已建好，但**实测后默认只留 mp**：搜狗那条兜不住（见下条）。所以公众号目前**仍然拿不到可用数据**，必须配 mp 凭据。凭据两条路：浏览器里登录后手动复制 token+cookie（推荐，无自动化痕迹），或跑扫码助手。实测裸 HTTP 的扫码流程可用（startlogin 回 uuid、getqrcode 回真实 JPEG），**不需要 Playwright**——参考项目 we-mp-rss 上浏览器是为了多账号切换和指纹伪装。凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
+| 文章列表要用 list_ex 不是 appmsgpublish | 参考项目 we-mp-rss 用的是 `appmsgpublish`，返回转义两层的 publish_page（publish_list → publish_info → appmsgex），解析链长且脆；实测同一个号 `appmsg?action=list_ex` 直接给扁平的 app_msg_list，一次 20 条、字段齐全 | 已改用 list_ex，并加测试钉住端点选择 |
+| 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | **已用真实凭据跑通**（2026-07-26）：量子位 + 机器之心共 34 条入库，标题/摘要/发布时间/封面图齐全。搜狗那条兜不住已降为可选（见下条）。凭据两条路：浏览器里登录后手动复制 token+cookie（推荐，无自动化痕迹），或跑扫码助手。实测裸 HTTP 的扫码流程可用（startlogin 回 uuid、getqrcode 回真实 JPEG），**不需要 Playwright**——参考项目 we-mp-rss 上浏览器是为了多账号切换和指纹伪装。凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
 | 公众号是最易被封的一条线 | 走的是公众平台后台接口，不是官方开放 API | 整块隔离在 `channels/wechat.py`，坏了整块换。账号之间留 3 秒间隔，凭据失效立刻停手不继续捅 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 

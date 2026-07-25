@@ -22,6 +22,8 @@ import yaml
 from ...contracts import (
     AuthExpired,
     Item,
+    Media,
+    MediaType,
     RateLimited,
     Source,
     SourceType,
@@ -35,7 +37,7 @@ log = logging.getLogger("sourcepilot.channels.wechat")
 
 CREDENTIALS_FILE = PROJECT_ROOT / "config" / "wechat_credentials.yaml"
 SEARCH_BIZ = "https://mp.weixin.qq.com/cgi-bin/searchbiz"
-APPMSG_PUBLISH = "https://mp.weixin.qq.com/cgi-bin/appmsgpublish"
+APPMSG_LIST = "https://mp.weixin.qq.com/cgi-bin/appmsg"
 
 #: 公众平台的业务错误码。它自己永远回 HTTP 200，真正的状态在响应体里。
 RET_OK = 0
@@ -118,31 +120,27 @@ class WechatClient:
         return (payload.get("list") or [None])[0]
 
     def list_articles(self, fakeid: str, count: int = 20) -> list[dict[str, Any]]:
+        """拉某个公众号的文章列表。
+
+        用 `appmsg?action=list_ex` 而不是 `appmsgpublish`：后者返回的是被转义两层的
+        publish_page 字符串（publish_list → publish_info → appmsgex），解析链长且脆；
+        前者直接给扁平的 app_msg_list，字段一目了然。实测同一个号，list_ex 一次给
+        20 条、字段齐全（aid/title/digest/link/update_time）。
+        """
         payload = self._get(
-            APPMSG_PUBLISH,
-            {"sub": "list", "begin": 0, "count": count, "fakeid": fakeid, "type": 101_0325},
+            APPMSG_LIST,
+            {
+                "action": "list_ex",
+                "begin": 0,
+                "count": min(count, 20),  # 对方单页上限就是 20
+                "fakeid": fakeid,
+                "type": 9,
+                "query": "",
+            },
         )
-        # publish_page 是一段被转义的 JSON 字符串，得二次解析。
-        import json
-
-        raw = payload.get("publish_page")
-        if not raw:
-            return []
-        try:
-            page = json.loads(raw) if isinstance(raw, str) else raw
-        except ValueError as exc:
-            raise UpstreamDown("publish_page 解析失败——多半是对方改版了") from exc
-
-        articles: list[dict[str, Any]] = []
-        for group in page.get("publish_list") or []:
-            info = group.get("publish_info")
-            if not info:
-                continue
-            try:
-                detail = json.loads(info) if isinstance(info, str) else info
-            except ValueError:
-                continue
-            articles.extend(detail.get("appmsgex") or [])
+        articles = payload.get("app_msg_list")
+        if articles is None:
+            raise UpstreamDown("响应里没有 app_msg_list——多半是对方改版了")
         return articles
 
 
@@ -168,8 +166,10 @@ def _to_item(article: dict[str, Any], account: str, now: datetime) -> Item | Non
         score=0.0,
         categories=[],
         lang="zh",
-        media=[],
-        raw={"aid": aid, "backend": "mp"},
+        media=(
+            [Media(type=MediaType.IMAGE, url=article["cover"])] if article.get("cover") else []
+        ),
+        raw={"aid": aid, "backend": "mp", "appmsgid": article.get("appmsgid")},
     )
 
 

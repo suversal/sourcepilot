@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from sourcepilot.channels.wechat import (
@@ -38,22 +36,22 @@ CONFIG = {
     "backends": ["mp"],
 }
 
+#: 字段名照真实响应（2026-07-26 实测 appmsg?action=list_ex）。
 ARTICLE = {
     "aid": "2650000001_1",
+    "appmsgid": "2650000001",
     "title": "某模型发布",
     "link": "https://mp.weixin.qq.com/s/abc?chksm=xxx",
     "digest": "一句话摘要",
+    "cover": "https://mmbiz.qlogo.cn/cover.jpg",
     "update_time": 1784711789,
+    "create_time": 1784711000,
 }
 
 
 def _publish_payload(articles):
-    return {
-        "base_resp": {"ret": 0},
-        "publish_page": json.dumps(
-            {"publish_list": [{"publish_info": json.dumps({"appmsgex": articles})}]}
-        ),
-    }
+    """list_ex 的响应形状——扁平的 app_msg_list，不是嵌套两层的 publish_page。"""
+    return {"base_resp": {"ret": 0}, "app_msg_list": articles}
 
 
 @pytest.fixture(autouse=True)
@@ -132,11 +130,23 @@ class TestErrorMapping:
 
 
 class TestCollect:
-    def test_without_credentials_reports_auth_expired(self, config, monkeypatch, tmp_path):
+    def test_without_credentials_is_a_config_state_not_a_failure(
+        self, config, monkeypatch, tmp_path
+    ):
+        """从没配过凭据是配置状态，不是故障。
+
+        仓库里这个源默认开着，别人克隆下来没凭据——那时候满屏报错没有意义，
+        /health 里的 last_item_count=0 已经把情况说清楚了。
+        """
         monkeypatch.setattr(
             "sourcepilot.channels.wechat.mp.CREDENTIALS_FILE", tmp_path / "absent.yaml"
         )
-        with pytest.raises(AuthExpired, match="未配置"):
+        assert collect_wechat(config) == []
+
+    def test_all_backends_cooling_down_is_a_failure(self, config, creds):
+        """全在冷却里说明刚被限流或凭据被拒——那是要让人看见的故障。"""
+        COOLDOWNS.penalize("mp", ErrorCode.RATE_LIMITED)
+        with pytest.raises(AuthExpired, match="冷却"):
             collect_wechat(config)
 
     def test_no_accounts_configured_is_not_an_error(self, creds, monkeypatch):
@@ -208,6 +218,47 @@ class TestCollect:
             collect_wechat(cfg)
         assert len(calls) == 1, "第一次就该停手"
 
+    def test_uses_list_ex_endpoint(self, config, creds, monkeypatch):
+        """必须打 appmsg?action=list_ex。
+
+        appmsgpublish 返回的是转义两层的 publish_page（publish_list → publish_info
+        → appmsgex），解析链长且脆；实测同一个号，list_ex 直接给扁平的
+        app_msg_list，一次 20 条、字段齐全。
+        """
+        import httpx
+
+        seen: list[dict] = []
+
+        def fake_get(self, url, **kw):
+            seen.append({"url": url, **kw.get("params", {})})
+            if "searchbiz" in url:
+                body = {"base_resp": {"ret": 0}, "list": [{"nickname": "量子位", "fakeid": "M=="}]}
+            else:
+                body = _publish_payload([ARTICLE])
+            return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+        monkeypatch.setattr(httpx.Client, "get", fake_get)
+        collect_wechat(config)
+        listing = seen[-1]
+        assert listing["url"].endswith("/cgi-bin/appmsg")
+        assert listing["action"] == "list_ex"
+        assert listing["type"] == 9
+
+    def test_cover_becomes_media(self, config, creds, monkeypatch):
+        import httpx
+
+        def fake_get(self, url, **kw):
+            body = (
+                {"base_resp": {"ret": 0}, "list": [{"nickname": "量子位", "fakeid": "M=="}]}
+                if "searchbiz" in url
+                else _publish_payload([ARTICLE])
+            )
+            return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+        monkeypatch.setattr(httpx.Client, "get", fake_get)
+        (item,) = collect_wechat(config)
+        assert len(item.media) == 1
+
     def test_malformed_publish_page_is_reported(self, config, creds, monkeypatch):
         import httpx
 
@@ -217,7 +268,7 @@ class TestCollect:
                 return httpx.Response(200, json=body, request=httpx.Request("GET", url))
             return httpx.Response(
                 200,
-                json={"base_resp": {"ret": 0}, "publish_page": "这不是 JSON"},
+                json={"base_resp": {"ret": 0}},  # 少了 app_msg_list
                 request=httpx.Request("GET", url),
             )
 
@@ -271,14 +322,13 @@ class TestCollect:
 
 
 class TestShippedConfig:
-    def test_wechat_source_is_disabled_by_default(self):
-        """没凭据就跑不了，默认开着只会让 /health 一直红。"""
+    def test_wechat_source_uses_the_channel(self):
         from sourcepilot.settings import SOURCES_DIR
         from sourcepilot.sources import load_sources
 
         cfg = load_sources(SOURCES_DIR)["wechat"]
-        assert cfg.enabled is False
         assert cfg.channel == "wechat"
+        assert cfg.backends == ["mp"], "搜狗实测兜不住，不该在默认链里"
 
     def test_credentials_file_is_gitignored(self):
         from sourcepilot.settings import PROJECT_ROOT
