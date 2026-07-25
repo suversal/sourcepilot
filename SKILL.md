@@ -26,6 +26,8 @@ description: 查询 AI 厂商官方发布与多平台科技热榜。当用户问
 | 「今天有什么事」「过去 24 小时」 | `GET BASE/api/v1/items?window=24h` |
 | 「最近一周的 AI 模型动态」 | `GET BASE/api/v1/items?window=7d&category=model` |
 | 「有什么新产品发布」 | `GET BASE/api/v1/items?window=7d&category=product` |
+| 「X 上关于某话题什么情况」「推特上在说什么」 | `GET BASE/api/v1/x/search?q=...` |
+| 「某人最近发了什么推」 | `GET BASE/api/v1/x/timeline?handle=OpenAI` |
 | 「这些源还活着吗」「采集正常吗」 | `GET BASE/api/v1/health` |
 
 `q` 做关键词检索（标题 + 摘要，中文直接按字符匹配，不用分词）。
@@ -114,6 +116,20 @@ LINUX DO、字节 Seed 这几个源只有标题**——它们的列表页就不�
 
 **降级不是错误**：如果 `ok: true` 但 `meta.stale: true`，说明现查没成但缓存兜住了——
 正常回答，加一句「非实时」即可。
+
+## 搜 X 的特殊说明
+
+`search_x` 是平台**唯一的现场查询**工具，其余都是读缓存。所以：
+
+- 它慢（要真去 X 取数），`meta.elapsed_ms` 会明显高于其它端点。
+- `meta.mode` 会告诉你实际走了哪条路：`live` 是现场取到的，`cache` 是降级的。
+- `mode: cache` + `stale: true` 时**必须说明「X 现查失败，以下为历史缓存」**，
+  不要让用户以为是刚发生的事。
+- 报 `AUTH_EXPIRED` 时如实说「X 搜索暂不可用」，**不要改用时间线冒充搜索结果**
+  ——那是两回事，用户问的是「大家在说什么」，不是「某个号发了什么」。
+
+`get_x_timeline` 不需要账号（走公开镜像），但它拿不到互动数，`score` 会是 0，
+别据此说「这条最热」。
 
 ---
 

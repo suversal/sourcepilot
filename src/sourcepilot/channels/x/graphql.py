@@ -1,0 +1,286 @@
+"""X 内部 GraphQL 后端——**搜索的唯一可行路径**，需要登录态。
+
+实测（2026-07-26）确认过：免登录搜索已经没有路了——Nitter 各实例的搜索一律返回 0 条，
+xcancel 要 RSS 白名单，X 自己的 guest token 虽然还能激活，但旧的
+`/2/search/adaptive.json` 已下线。所以「现场搜 X」这个差异点必须走登录 GraphQL。
+
+三层反爬按需叠加，不一次全上（能少用就少用，每一层都是维护成本）：
+
+  第一层  cookie + ct0 csrf + 公开 Bearer      —— 必需
+  第二层  TLS/JA3 指纹伪装（curl_cffi）        —— 撞 Cloudflare 时才开
+  第三层  x-client-transaction-id 动态签名     —— 见 signature.py，X 强制时才开
+
+签名那层是最贵的（要跟着 X 前端改版走），所以做成可插拔：先不带它试，
+被拒了再挂上。`transaction_signer` 传 None 就是关闭。
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from typing import Any, Protocol
+
+import httpx
+
+from ...contracts import Item, Media, MediaType, Source, SourceType, TimeBasis, UpstreamDown
+from .accounts import Account, AccountPool
+from .config import DEFAULT_FEATURES, GRAPHQL_BASE, OPERATIONS, PUBLIC_BEARER
+
+log = logging.getLogger("sourcepilot.channels.x")
+
+
+class TransactionSigner(Protocol):
+    """x-client-transaction-id 的生成器。可插拔——X 不强制时就不挂。"""
+
+    def sign(self, method: str, path: str) -> str: ...
+
+
+def _score(legacy: dict[str, Any]) -> float:
+    """互动量归一化，口径与 FxTwitter 后端一致，免得同一条推两个后端给出不同分。"""
+    stats = (
+        int(legacy.get("favorite_count") or 0)
+        + int(legacy.get("retweet_count") or 0) * 2
+        + int(legacy.get("reply_count") or 0)
+    )
+    return round(min(stats / (stats + 1000.0), 1.0), 4) if stats else 0.0
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        # X 的格式：Wed Jul 22 13:00:00 +0000 2026
+        return datetime.strptime(value, "%a %b %d %H:%M:%S %z %Y").astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _media(legacy: dict[str, Any]) -> list[Media]:
+    out: list[Media] = []
+    entities = (legacy.get("extended_entities") or legacy.get("entities") or {}).get("media") or []
+    for entry in entities:
+        url = entry.get("media_url_https")
+        if not url:
+            continue
+        is_video = entry.get("type") in ("video", "animated_gif")
+        kind = MediaType.VIDEO if is_video else MediaType.IMAGE
+        out.append(Media(type=kind, url=url))
+    return out
+
+
+def tweet_result_to_item(result: dict[str, Any], now: datetime) -> Item | None:
+    """把 GraphQL 的 TweetResult 拍平成 Item。
+
+    X 的响应嵌套很深且形状不稳（推文可能被包在 `tweet` 里，用户在
+    `core.user_results.result.legacy`），所以每一层都用 get 兜住。
+    """
+    if result.get("__typename") == "TweetWithVisibilityResults":
+        result = result.get("tweet") or {}
+
+    legacy = result.get("legacy") or {}
+    tweet_id = legacy.get("id_str") or result.get("rest_id")
+    if not tweet_id:
+        return None
+
+    user = (
+        ((result.get("core") or {}).get("user_results") or {}).get("result") or {}
+    )
+    handle = (user.get("legacy") or {}).get("screen_name") or (user.get("core") or {}).get(
+        "screen_name"
+    )
+    if not handle:
+        return None
+
+    # 长推文的全文在 note_tweet 里，legacy.full_text 是被截断的。
+    note = (
+        ((result.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result") or {}
+    )
+    text = (note.get("text") or legacy.get("full_text") or "").strip()
+    if not text:
+        return None
+
+    published = _parse_time(legacy.get("created_at"))
+    return Item(
+        id=f"x:{tweet_id}",
+        source=Source(type=SourceType.X, name="X / Twitter", platform="x"),
+        title=text[:80],
+        summary=text if len(text) > 80 else None,
+        url=f"https://x.com/{handle}/status/{tweet_id}",
+        author=handle,
+        published_at=published,
+        discovered_at=now,
+        time_basis=TimeBasis.PUBLISHED if published else TimeBasis.DISCOVERED,
+        score=_score(legacy),
+        categories=[],
+        lang=legacy.get("lang"),
+        media=_media(legacy),
+        raw={
+            "backend": "graphql",
+            "likes": legacy.get("favorite_count"),
+            "retweets": legacy.get("retweet_count"),
+            "replies": legacy.get("reply_count"),
+            "views": (result.get("views") or {}).get("count"),
+        },
+    )
+
+
+def walk_timeline(payload: dict[str, Any], now: datetime) -> tuple[list[Item], str | None]:
+    """遍历 timeline 指令，抽出推文与下一页游标。
+
+    X 把结果放在 instructions[].entries[] 里，条目类型混杂（推文、游标、模块），
+    所以按 entryId 前缀分派，遇到不认识的类型就跳过而不是报错——
+    X 随时会加新类型，为此整条崩掉不值得。
+    """
+    items: list[Item] = []
+    cursor: str | None = None
+
+    def visit_entry(entry: dict[str, Any]) -> None:
+        nonlocal cursor
+        entry_id = entry.get("entryId") or ""
+        content = entry.get("content") or {}
+
+        if entry_id.startswith("cursor-bottom") or content.get("cursorType") == "Bottom":
+            cursor = content.get("value") or cursor
+            return
+
+        # 单条推文
+        item_content = content.get("itemContent") or {}
+        result = ((item_content.get("tweet_results") or {}).get("result")) or {}
+        if result:
+            parsed = tweet_result_to_item(result, now)
+            if parsed is not None:
+                items.append(parsed)
+            return
+
+        # 模块（会话串等）里还有一层
+        for sub in content.get("items") or []:
+            sub_content = (sub.get("item") or {}).get("itemContent") or {}
+            sub_result = ((sub_content.get("tweet_results") or {}).get("result")) or {}
+            if sub_result:
+                parsed = tweet_result_to_item(sub_result, now)
+                if parsed is not None:
+                    items.append(parsed)
+
+    data = payload.get("data") or {}
+    timeline = (
+        (data.get("search_by_raw_query") or {}).get("search_timeline")
+        or ((data.get("user") or {}).get("result") or {}).get("timeline_v2")
+        or ((data.get("user") or {}).get("result") or {}).get("timeline")
+        or {}
+    ).get("timeline") or {}
+
+    for instruction in timeline.get("instructions") or []:
+        for entry in instruction.get("entries") or []:
+            visit_entry(entry)
+        if instruction.get("entry"):
+            visit_entry(instruction["entry"])
+
+    return items, cursor
+
+
+class GraphQLBackend:
+    name = "graphql"
+    supports = frozenset({"search", "timeline"})
+
+    def __init__(
+        self,
+        pool: AccountPool | None = None,
+        timeout: float = 10.0,
+        impersonate: str | None = None,
+        transaction_signer: TransactionSigner | None = None,
+    ) -> None:
+        self.pool = pool if pool is not None else AccountPool.load()
+        self.timeout = timeout
+        self.impersonate = impersonate
+        self.signer = transaction_signer
+
+    def available(self) -> bool:
+        return bool(self.pool.accounts)
+
+    def _request(self, account: Account, operation: str, variables: dict[str, Any]) -> dict:
+        import json
+
+        query_id = OPERATIONS.get(operation)
+        if not query_id:
+            raise UpstreamDown(f"没有配置 {operation} 的 operation id")
+
+        path = f"/{query_id}/{operation}"
+        params = {
+            "variables": json.dumps(variables, separators=(",", ":")),
+            "features": json.dumps(DEFAULT_FEATURES, separators=(",", ":")),
+        }
+        headers = account.headers(PUBLIC_BEARER)
+        if self.signer is not None:
+            headers["x-client-transaction-id"] = self.signer.sign("GET", f"/i/api/graphql{path}")
+
+        url = f"{GRAPHQL_BASE}{path}"
+        try:
+            if self.impersonate:
+                from curl_cffi import requests as curl_requests
+
+                response = curl_requests.get(
+                    url, params=params, headers=headers,
+                    timeout=self.timeout, impersonate=self.impersonate,
+                )
+            else:
+                with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                    response = client.get(url, params=params, headers=headers)
+        except Exception as exc:
+            raise UpstreamDown(f"X GraphQL 连接失败：{type(exc).__name__}") from exc
+
+        # 先过状态机：它负责区分「限流」与「账号废了」，并在必要时抛错。
+        self.pool.classify(account, operation, response)
+
+        if response.status_code == 404:
+            # twscrape 的经验：404 往往意味着 operation id 或签名过期，而不是内容不存在。
+            raise UpstreamDown(
+                f"{operation} 返回 404——operation id 多半过期了，"
+                f"更新 channels/x/config.py 里的 OPERATIONS"
+            )
+        if response.status_code != 200:
+            raise UpstreamDown(f"X GraphQL 返回 {response.status_code}")
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise UpstreamDown("X GraphQL 返回的不是 JSON") from exc
+
+    def search(
+        self, query: str, limit: int, cursor: str | None = None
+    ) -> tuple[list[Item], str | None]:
+        account = self.pool.acquire("SearchTimeline")
+        variables = {
+            "rawQuery": query,
+            "count": min(limit, 20),
+            "querySource": "typed_query",
+            "product": "Latest",  # 按时间倒序，不是「热门」——资讯要的是最新
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        payload = self._request(account, "SearchTimeline", variables)
+        return walk_timeline(payload, datetime.now(UTC))
+
+    def timeline(
+        self, user_id: str, limit: int, cursor: str | None = None
+    ) -> tuple[list[Item], str | None]:
+        account = self.pool.acquire("UserTweets")
+        variables = {
+            "userId": user_id,
+            "count": min(limit, 20),
+            "includePromotedContent": False,
+            "withQuickPromoteEligibilityTweetFields": False,
+            "withVoice": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        payload = self._request(account, "UserTweets", variables)
+        return walk_timeline(payload, datetime.now(UTC))
+
+    def user_id(self, handle: str) -> str | None:
+        account = self.pool.acquire("UserByScreenName")
+        payload = self._request(
+            account,
+            "UserByScreenName",
+            {"screen_name": handle.lstrip("@"), "withSafetyModeUserFields": True},
+        )
+        return (((payload.get("data") or {}).get("user") or {}).get("result") or {}).get("rest_id")

@@ -21,10 +21,10 @@
 
 契约 v1.1.0，采集链路端到端跑通（22 源 / 3 端点，含后台定时采集），X 后端未开始。
 
-已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/article`、
-`GET /api/v1/wechat/feed`、`GET /api/v1/health`。
-契约里的 `search_x` / `get_x_timeline` 尚未实现，
-**没有占位端点**——没接的能力就是访问不到，不给假数据。
+已上线：`GET /api/v1/hotlist`、`GET /api/v1/items`、`GET /api/v1/x/search`、
+`GET /api/v1/x/timeline`、`GET /api/v1/wechat/feed`、`GET /api/v1/article`、`GET /api/v1/health`。
+契约定义的六个工具已全部实现。`search_x` 是唯一的**现查**工具，需要 X 账号 cookie；
+其余都是读缓存。X 时间线走公开镜像，不需要账号。
 
 公众号 channel 走 `mp`（公众平台）后端，需自行配置凭据；没配时该源静默跳过，不影响其它信源。
 （另有免凭据的 `sogou` 后端，但实测数据陈旧、易触发验证码，默认不启用。）

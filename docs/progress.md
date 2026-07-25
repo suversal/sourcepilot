@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.1.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
 | 2 | REST + SKILL.md + 首个信源 | ⚠️ 基本完成 | 声明式引擎（JSON/HTML/RSS）、22 个信源、3 个端点、后台调度器、[SKILL.md](../SKILL.md) | 127 项离线测试 + 真实 uvicorn curl 验证 |
-| 3 | X 后端（签名/账号池/限流） | ⬜ 未开始 | — | — |
+| 3 | X 后端（签名/账号池/限流） | 🔶 大部分完成 | 三后端路由（fxtwitter/nitter/graphql）、账号池 + 限流状态机、`search_x` 现查降级链、两个 REST 端点 | 30 项离线测试；**免登录部分真实跑通**（Nitter 时间线、FxTwitter 单推）；**GraphQL 搜索待你配 cookie 后验证** |
 | 4 | 可靠性层（Canary/故障转移/代理） | ⬜ 未开始 | — | — |
 | 5 | MCP 出口 | ⬜ 未开始 | — | — |
 | 6 | 迁 RSS + 公众号 channel | ✅ 完成 | RSS 提取器、公众号 channel（mp 后端 + 冷却状态机）、`/api/v1/wechat/feed` | 27 项离线测试 + **真实凭据端到端跑通**：量子位/机器之心共 34 条入库 |
@@ -38,6 +38,8 @@
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
 - `GET /api/v1/article` — 读单篇正文转 Markdown（现查，带 SSRF 防护）
+- `GET /api/v1/x/search` — 现场搜 X（**唯一的现查工具**，带超时降级回缓存）
+- `GET /api/v1/x/timeline` — 指定用户时间线（优先零认证镜像，省账号配额）
 - `GET /api/v1/wechat/feed` — 订阅公众号最新文章（缓存，需自行配置凭据）
 
 已接信源 22 个，分两类：
@@ -58,9 +60,9 @@
 性能：冷启动约 40s（22 源串行抓），查询路径不做网络请求，稳定在毫秒级。
 实测一轮采集入库 1693 条。
 
-### 契约里定义但尚未实现
+### 契约里定义的工具
 
-`search_x` · `get_x_timeline`
+六个全部实现。`search_x` 需要 X 账号 cookie 才能真正工作（见下方已知问题）。
 
 **刻意不给占位端点**——没接的能力就是访问不到，不返回假数据。
 SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
@@ -103,6 +105,9 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 部分源拿不到发布时间 | 头条热榜 API、掘金热榜 API 均不返回时间字段（掘金 `ctime`/`mtime` 都是 0）；36氪快讯列表只有相对时间 | 如实标 `time_basis=discovered`。要拿真实时间得进详情页，属 `read_article` 的范畴 |
 | **搜狗兜不住，已降为可选** | 实测各取 10 条：量子位只出 2 条(含 2019 年的)、机器之心 9 条全是 2017 年、新智元第三个号就撞验证码；`sortType=1&tsn=1` 按时间排序返回 0 条。根因是它给的是按相关性排的搜索结果而非时间流，且每条要额外请求还原跳转 | 默认 `backends: [mp]`。代码保留但不默认启用——静默返回 2017 年文章的兜底比没有兜底更危险 |
 | 搜狗给的是限时链接 | 还原出的 `mp.weixin.qq.com/s?src=11&timestamp=…&signature=…` 几小时到一天后失效 | 条目 `raw.link_expires=true` 标注。这是降级路线的固有代价，主力（公众平台）给的是永久链接 |
+| **免登录搜 X 已无路可走** | 实测 2026-07-26：Nitter 各实例搜索一律返回 0 条（搜索最费上游配额，是各实例最先关的功能）；xcancel 要 RSS 客户端白名单；X guest token 还能激活但旧的 `/2/search/adaptive.json` 已下线 | `search_x` 只能走登录态 GraphQL。时间线不受影响——Nitter 的时间线实测可用（19 条真推文） |
+| X operation id 会随前端发版轮换 | GraphQL 的 queryId 过期表现为 404 | 抽在 `channels/x/config.py` 的 `OPERATIONS` 里，改版=改配置。404 的报错信息直接提示去改那个文件 |
+| x-client-transaction-id 尚未实现 | 页面里 `loading-x-anim` 与 `twitter-site-verification` 都还在，说明签名机制仍在用；但 X 换了新的 x-web bundle，twscrape 的抽取路径未必适用 | 做成可插拔的 `transaction_signer`，先不带它试；X 强制时再补。这是最贵的一层（要跟着前端改版走） |
 | 文章列表要用 list_ex 不是 appmsgpublish | 参考项目 we-mp-rss 用的是 `appmsgpublish`，返回转义两层的 publish_page（publish_list → publish_info → appmsgex），解析链长且脆；实测同一个号 `appmsg?action=list_ex` 直接给扁平的 app_msg_list，一次 20 条、字段齐全 | 已改用 list_ex，并加测试钉住端点选择 |
 | 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | **已用真实凭据跑通**（2026-07-26）：量子位 + 机器之心共 34 条入库，标题/摘要/发布时间/封面图齐全。搜狗那条兜不住已降为可选（见下条）。凭据两条路：浏览器里登录后手动复制 token+cookie（推荐，无自动化痕迹），或跑扫码助手。实测裸 HTTP 的扫码流程可用（startlogin 回 uuid、getqrcode 回真实 JPEG），**不需要 Playwright**——参考项目 we-mp-rss 上浏览器是为了多账号切换和指纹伪装。凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
 | 公众号是最易被封的一条线 | 走的是公众平台后台接口，不是官方开放 API | 整块隔离在 `channels/wechat.py`，坏了整块换。账号之间留 3 秒间隔，凭据失效立刻停手不继续捅 |

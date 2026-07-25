@@ -397,7 +397,7 @@ class TestCooldownStateMachine:
     """区分「临时挡一下」和「这条路废了」——两者的正确反应完全相反。"""
 
     def test_auth_failure_cools_far_longer_than_rate_limit(self):
-        from sourcepilot.channels.wechat.cooldown import COOLDOWN_SECONDS
+        from sourcepilot.channels.cooldown import COOLDOWN_SECONDS
 
         assert COOLDOWN_SECONDS[ErrorCode.AUTH_EXPIRED] > COOLDOWN_SECONDS[ErrorCode.RATE_LIMITED]
 

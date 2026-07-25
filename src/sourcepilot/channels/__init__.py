@@ -4,6 +4,6 @@
 降级路径——出口层看到的是同一种 Outcome，不因为后端不同而分叉。
 """
 
-from . import wechat  # noqa: F401  导入即注册
+from . import wechat, x  # noqa: F401  导入即注册
 
-__all__ = ["wechat"]
+__all__ = ["wechat", "x"]

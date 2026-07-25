@@ -20,3 +20,4 @@ config/proxies.yaml
 
 .DS_Store
 config/wechat_credentials.yaml
+config/x_accounts.yaml

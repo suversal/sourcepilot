@@ -193,6 +193,10 @@ class SourceConfig(BaseModel):
             "留空则用 channel 自己的默认顺序。"
         ),
     )
+    nitter_instances: list[str] = Field(
+        default_factory=list,
+        description="channel 专用：自建 Nitter 实例，排在公共实例前面（公共实例寿命很短）",
+    )
     per_account_limit: int = Field(
         default=10, ge=1, le=50, description="channel 专用：每个账号取多少条"
     )

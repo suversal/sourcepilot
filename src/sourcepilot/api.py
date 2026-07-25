@@ -27,13 +27,16 @@ from .contracts import (
     GetFeedParams,
     GetHotlistParams,
     GetWechatFeedParams,
+    GetXTimelineParams,
     ItemsPayload,
     ReadArticleParams,
+    SearchXParams,
     SourcePilotError,
 )
 from .services import FeedService, HotlistService, WechatFeedService
 from .sources import SourceConfig, load_sources
 from .store import Store
+from .x_service import XSearchService, XTimelineService
 
 
 def _envelope_response(env: Envelope, status: int = 200) -> JSONResponse:
@@ -53,6 +56,8 @@ def create_app(
     feed = FeedService(store)
     article = ArticleService()
     wechat = WechatFeedService(store)
+    x_search = XSearchService(store)
+    x_timeline = XTimelineService(store)
     background = Scheduler(collector)
 
     @asynccontextmanager
@@ -109,6 +114,8 @@ def create_app(
             "endpoints": [
                 f"{API_PREFIX}/hotlist",
                 f"{API_PREFIX}/items",
+                f"{API_PREFIX}/x/search",
+                f"{API_PREFIX}/x/timeline",
                 f"{API_PREFIX}/wechat/feed",
                 f"{API_PREFIX}/article",
                 f"{API_PREFIX}/health",
@@ -164,6 +171,30 @@ def create_app(
         q 关键词检索、platform 按信源过滤、since 做增量、cursor 做分页，可组合。
         """
         return feed.get(params)
+
+    @app.get(f"{API_PREFIX}/x/search", tags=["tools"], summary="search_x")
+    async def search_x(
+        params: Annotated[SearchXParams, Query()],
+    ) -> Envelope[ItemsPayload]:
+        """现场搜 X（现查 + 缓存兜底）。
+
+        这是平台唯一的现查工具。现查失败但缓存兜住时返回 ok=true + stale=true
+        ——降级不是错误；缓存也空时才报错。live=false 强制只读缓存。
+        """
+        env = x_search.search(params)
+        if not env.ok and env.error is not None:
+            return _envelope_response(env, HTTP_STATUS[env.error.code])  # type: ignore[return-value]
+        return env
+
+    @app.get(f"{API_PREFIX}/x/timeline", tags=["tools"], summary="get_x_timeline")
+    async def get_x_timeline(
+        params: Annotated[GetXTimelineParams, Query()],
+    ) -> Envelope[ItemsPayload]:
+        """指定用户的时间线。优先走零认证的 Nitter，省账号配额。"""
+        env = x_timeline.get(params)
+        if not env.ok and env.error is not None:
+            return _envelope_response(env, HTTP_STATUS[env.error.code])  # type: ignore[return-value]
+        return env
 
     @app.get(f"{API_PREFIX}/wechat/feed", tags=["tools"], summary="get_wechat_feed")
     async def get_wechat_feed(

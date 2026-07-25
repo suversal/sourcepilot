@@ -1,0 +1,39 @@
+# X（Twitter）channel。默认禁用——先按需要决定要不要常驻采集。
+#
+# ── 三个后端，按能力分工（实测 2026-07-26）──────────────────
+#   fxtwitter  单推 / 用户资料   零认证 ✅ 已验证（能拿到互动数）
+#   nitter     时间线           零认证 ✅ 已验证（nitter.net 出 19 条真推文）
+#   graphql    搜索 / 时间线     **需登录 cookie**
+#
+# ── 为什么搜索必须登录 ──────────────────────────────────
+#   Nitter 各实例的搜索一律返回 0 条（搜索最费上游配额，是各实例最先关的功能）
+#   xcancel 要求 RSS 客户端先备案
+#   X 自己的 guest token 还能激活，但旧的 /2/search/adaptive.json 已下线
+#   → 免登录搜 X 已经没有路了
+#
+# ── 怎么配账号 ─────────────────────────────────────────
+#   写进 config/x_accounts.yaml（已在 .gitignore 里）：
+#     accounts:
+#       - name: acct1
+#         cookie: "auth_token=...; ct0=..."     # 从浏览器开发者工具复制
+#   cookie 里必须有 ct0——GraphQL 要求 x-csrf-token 与它相等，缺了一定被拒。
+#   **强烈建议用专用小号**：这条线抓的是内部 GraphQL，有封号风险。
+#
+# 时间线优先走零认证的 Nitter，能不动用账号就不动——账号是稀缺且脆弱的资源。
+name: x
+display_name: X / Twitter
+type: x
+platform: x
+enabled: false
+channel: x
+min_interval: 900
+lang: en
+
+# 自建 Nitter 实例（公共实例寿命很短，实测只剩 nitter.net 的时间线还活着）
+nitter_instances: []
+
+# 定时采集这些账号的时间线进库。库里有东西，search_x 现查失败时的降级才有意义。
+per_account_limit: 20
+accounts: []
+  # - OpenAI
+  # - AnthropicAI

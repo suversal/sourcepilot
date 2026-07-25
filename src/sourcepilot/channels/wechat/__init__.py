@@ -20,22 +20,16 @@ from __future__ import annotations
 
 import logging
 
-from ...contracts import AuthExpired, ErrorCode, Item, SourcePilotError
+from ...contracts import AuthExpired, Item, SourcePilotError
 from ...sources.config import SourceConfig
 from ...sources.engine import register_channel
-from .cooldown import COOLDOWNS
+from ..cooldown import BACKEND_LEVEL_FAILURES, COOLDOWNS
 from .mp import Credentials, MpBackend, WechatClient
 from .sogou import SogouBackend
 
 log = logging.getLogger("sourcepilot.channels.wechat")
 
 BACKENDS = {"mp": MpBackend, "sogou": SogouBackend}
-
-#: 只有这几种故障值得冷却整个后端——它们都在说「再捅就要出事」。
-#: 其余错误（改版、内容没了、网络抖动）是单个账号的事，冷却后端会饿死其它账号。
-BACKEND_LEVEL_FAILURES = frozenset(
-    {ErrorCode.AUTH_EXPIRED, ErrorCode.RATE_LIMITED, ErrorCode.CAPTCHA}
-)
 
 
 def _build(names: list[str]):
