@@ -28,7 +28,8 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.ruff]
-line-length = 88
+# 放宽到 100：中文注释按字符计宽，88 下几乎每条说明都要折行。
+line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]

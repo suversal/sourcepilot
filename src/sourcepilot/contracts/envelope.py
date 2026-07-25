@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from .errors import ErrorBody, ErrorCode, SourcePilotError
 from .item import Item, Utc, to_utc
 from .version import CONTRACT_VERSION
-
-DataT = TypeVar("DataT")
 
 
 class Mode(StrEnum):
@@ -59,7 +56,7 @@ class Meta(BaseModel):
         return None if v is None else v.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-class Envelope(BaseModel, Generic[DataT]):
+class Envelope[DataT](BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ok: bool

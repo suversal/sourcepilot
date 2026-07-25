@@ -1,0 +1,22 @@
+name: toutiao
+display_name: 今日头条热榜
+type: hotlist
+platform: toutiao
+enabled: true
+min_interval: 300
+lang: zh
+
+request:
+  url: https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc
+
+extract:
+  format: json
+  list: data
+  fields:
+    native_id: ClusterId
+    title: Title
+    url: Url
+    score_raw:
+      path: HotValue
+      type: int
+    image: Image.url

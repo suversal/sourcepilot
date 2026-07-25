@@ -1,0 +1,30 @@
+name: bilibili
+display_name: B站全站排行榜
+type: hotlist
+platform: bilibili
+enabled: true
+min_interval: 600
+lang: zh
+
+request:
+  url: https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
+  headers:
+    Referer: https://www.bilibili.com/
+
+extract:
+  format: json
+  list: data.list
+  fields:
+    native_id: bvid
+    title: title
+    url:
+      template: https://www.bilibili.com/video/{bvid}
+    summary: desc
+    author: owner.name
+    published_at:
+      path: pubdate
+      type: unix
+    score_raw:
+      path: stat.view
+      type: int
+    image: pic

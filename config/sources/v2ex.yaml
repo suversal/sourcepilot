@@ -1,0 +1,30 @@
+# 根即列表（extract.list 留空）的样例源。
+name: v2ex
+display_name: V2EX 最热主题
+type: hotlist
+platform: v2ex
+enabled: true
+min_interval: 600
+lang: zh
+categories: [tip]
+
+request:
+  url: https://www.v2ex.com/api/topics/hot.json
+
+extract:
+  format: json
+  list: ""
+  fields:
+    native_id:
+      path: id
+      type: int
+    title: title
+    url: url
+    summary: content
+    author: member.username
+    published_at:
+      path: created
+      type: unix
+    score_raw:
+      path: replies
+      type: int

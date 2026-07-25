@@ -1,0 +1,29 @@
+# 已禁用。2026-07-25 实测：不带 cookie 直接 403 {"error":"Forbidden"}。
+# newsnow 的做法是硬编码一枚匿名 SUB cookie，但那玩意会过期，属于「今天能跑、
+# 下个月悄悄坏掉」的写法。等做完 Canary 自检、能第一时间发现失效之后再启用，
+# 或者改成先访问 weibo.com 走访客系统换 cookie（需要执行 JS，成本更高）。
+name: weibo
+display_name: 微博热搜
+type: hotlist
+platform: weibo
+enabled: false
+min_interval: 300
+lang: zh
+
+request:
+  url: https://weibo.com/ajax/side/hotSearch
+  headers:
+    Referer: https://weibo.com/
+    # Cookie: SUB=<匿名访客 cookie>
+
+extract:
+  format: json
+  list: data.realtime
+  fields:
+    native_id: word_scheme
+    title: word
+    url:
+      template: https://s.weibo.com/weibo?q={word_scheme|urlencode}
+    score_raw:
+      path: num
+      type: int

@@ -1,0 +1,25 @@
+# 深层嵌套取值的样例源（content.title / author.name）。
+name: juejin
+display_name: 掘金后端热榜
+type: hotlist
+platform: juejin
+enabled: true
+min_interval: 900
+lang: zh
+
+request:
+  url: https://api.juejin.cn/content_api/v1/content/article_rank?category_id=1&type=hot
+
+extract:
+  format: json
+  list: data
+  fields:
+    native_id: content.content_id
+    title: content.title
+    url:
+      template: https://juejin.cn/post/{content.content_id}
+    summary: content.brief
+    author: author.name
+    score_raw:
+      path: content_counter.view
+      type: int

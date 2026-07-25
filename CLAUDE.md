@@ -48,10 +48,18 @@ Python 3.12+ / FastAPI / pydantic v2 / SQLite。选 Python 是因为 X 签名（
 - **`live=false` 不算 stale**：用户明确要缓存，拿到缓存就是正确结果。
 - **`window` 只表时间范围**，取数模式归 `live` 管，两者别再混。
 
-## 落地顺序（当前进度：第 1 步完成，下一步 REST + hotlist）
+## 代码地图
+
+- `contracts/` 契约（唯一合同）· `sources/` 声明式引擎 · `store.py` SQLite 缓存
+- `services.py` 业务判断（降级、缓存、分源健康）· `api.py` REST 壳，只做协议翻译
+- **补 MCP 出口时改 `api.py` 的同级新文件，不许把逻辑抄一份**——服务层才是那「一套核心」。
+
+## 落地顺序（当前进度：第 2 步完成，下一步 X 后端）
 
 1. ~~先定死工具契约（schema/Item/错误码）~~ ✅ v1.0.0 已冻结，见 docs/contract.md。
-2. REST + SKILL.md，**先接 hotlist**（低风险、能验证声明式 YAML 引擎）打通，用 Codex 装 skill 验证「提问→查→中文简报」整链路。
+2. ~~REST + SKILL.md + 声明式 hotlist 引擎~~ ✅ 已接 B站/头条/V2EX/掘金四源，
+   `/api/v1/hotlist`、`/api/v1/items`、`/api/v1/health` 可用。待办：用 Codex 装 SKILL.md
+   实测「提问→查→中文简报」整链路。
 3. X 后端硬骨头：签名 + 账号池 + 限流状态机（区分临时限流 vs 封号）。简历核心，多打磨。
 4. 可靠性层：Canary 自检、故障转移、代理轮换（接 Clash）。
 5. 补 MCP（换协议壳）。
