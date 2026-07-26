@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from . import __version__
 from .article import ArticleService
+from .canary import Canary
 from .collector import Collector, Scheduler
 from .contracts import (
     API_PREFIX,
@@ -52,6 +53,7 @@ def create_app(
     store = store or Store()
     sources = sources if sources is not None else load_sources()
     collector = Collector(store, sources)
+    canary = Canary(store, sources)
     hotlist = HotlistService(collector)
     feed = FeedService(store)
     article = ArticleService()
@@ -124,7 +126,11 @@ def create_app(
 
     @app.get(f"{API_PREFIX}/health", tags=["meta"])
     async def health() -> dict:
-        """各源采集状态。Canary 自检做起来之前，这就是唯一的可观测窗口。"""
+        """各源采集状态 + Canary 判定。
+
+        `canary.ok` 为 false 表示**有源彻底不产出了**，需要人介入。
+        单个源 degraded 不影响整体 ok——一个源落后不等于平台不可用。
+        """
         states = store.all_states()
         listing = []
         for name, config in sorted(sources.items()):
@@ -145,10 +151,12 @@ def create_app(
                     "last_item_count": state.get("last_item_count", 0),
                 }
             )
+        report = canary.summary()
         return {
-            "ok": True,
+            "ok": report["ok"],
             "contract_version": CONTRACT_VERSION,
             "cached_items": store.count_items(),
+            "canary": {"counts": report["counts"], "problems": report["problems"]},
             "sources": listing,
         }
 

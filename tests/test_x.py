@@ -374,11 +374,16 @@ class TestTransactionSignature:
 
         base64.b64decode(sig + "=" * (-len(sig) % 4))  # 能解回来说明是合法 base64
 
-    def test_每次都不同(self):
-        """带时间戳与随机噪声——X 靠这个防重放，实测截获重放确实会 404。"""
+    def test_output_varies_between_calls(self):
+        """带时间戳与随机噪声——X 靠这个防重放，实测截获重放确实会 404。
+
+        断言「多次调用会产生多个不同结果」，而不是「N 次全不同」：混淆字节只有
+        256 种取值，同一秒内连发几次本来就可能撞上。要求全不同会让这条测试
+        偶发失败——一条会无故变红的测试比没有测试更糟，它会让人开始无视失败。
+        """
         s = self._signer()
-        sigs = {s.sign("GET", "/i/api/graphql/x/SearchTimeline") for _ in range(5)}
-        assert len(sigs) == 5
+        sigs = {s.sign("GET", "/i/api/graphql/x/SearchTimeline") for _ in range(20)}
+        assert len(sigs) > 1
 
     def test_signature_is_bound_to_method_and_path(self):
         """签名绑方法与路径，所以截一个换个端点用也没用。"""
