@@ -21,8 +21,7 @@ GRAPHQL_BASE = "https://x.com/i/api/graphql"
 GUEST_ACTIVATE = "https://api.x.com/1.1/guest/activate.json"
 
 #: operation id → 名称。**会过期**，过期表现为 GraphQL 404。
-#: 更新方式见模块文档。
-#: 抓取自浏览器里的真实请求（2026-07-26）。原先那组是凭记忆写的，实测**全部过期**。
+#: 抓取自浏览器里的真实请求（2026-07-26）。原先那组是凭记忆写的，实测全部过期。
 OPERATIONS: dict[str, str] = {
     "SearchTimeline": "kn0jeHGOUFYdNe_FUxwxsQ",
     "UserByScreenName": "2qvSHpkWTMS9i0zJAwDNiA",
@@ -107,6 +106,19 @@ NITTER_INSTANCES: list[str] = [
 #: 不是临时限流——冷却再久也没用，得换账号。
 FATAL_ERROR_CODES = frozenset({32, 64, 88, 89, 326})
 #: 32=认证失败 64=账号被封 88=速率超限(账号级) 89=token 失效 326=账号被锁
+
+#: 这些 operation **强制要求 x-client-transaction-id**，且该签名是一次性的。
+#:
+#: 实测（2026-07-26，在真实登录态浏览器里对照验证）：
+#:   UserByScreenName  不带签名 → 200 ✅
+#:   UserTweets        不带签名 → 200 ✅（229KB 真实数据）
+#:   UserMedia         不带签名 → 200 ✅
+#:   SearchTimeline    不带签名 → 404 ❌
+#:                     **带浏览器刚生成的签名重放 → 依然 404** ❌
+#:
+#: 最后那条最关键：签名不能截获复用，必须能**现场生成**（带时间戳/nonce）。
+#: 所以搜索这条路绕不开复刻 twscrape 的 xclid 那套算法。
+SIGNED_OPERATIONS = frozenset({"SearchTimeline"})
 
 RATE_LIMIT_REMAINING_HEADER = "x-rate-limit-remaining"
 RATE_LIMIT_RESET_HEADER = "x-rate-limit-reset"

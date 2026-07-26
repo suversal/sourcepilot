@@ -319,3 +319,41 @@ class TestRouter:
         )
         items, _ = router.timeline("OpenAI", 5)
         assert items == ["来自 nitter"]
+
+
+class TestSignatureRequirement:
+    """X 对 operation 分化地强制 x-client-transaction-id（2026-07-26 实测）。
+
+    在真实登录态浏览器里逐个对照过：
+        UserByScreenName / UserTweets / UserMedia  不带签名 → 200
+        SearchTimeline                             不带签名 → 404
+                                                   带截获的签名重放 → 仍 404
+    最后一条说明签名是一次性的，截获复用无效。
+    """
+
+    def _backend(self, signer=None):
+        return GraphQLBackend(
+            pool=AccountPool([Account(name="a", cookie="auth_token=x; ct0=c")]),
+            transaction_signer=signer,
+        )
+
+    def test_search_without_signer_fails_fast_with_a_clear_reason(self):
+        """与其发出去等一个语焉不详的 404，不如直接说清楚缺什么。"""
+        with pytest.raises(AuthExpired, match="x-client-transaction-id"):
+            self._backend().search("test", 5)
+
+    def test_timeline_operations_do_not_require_a_signer(self, monkeypatch):
+        """时间线不需要签名——实测可用，别因为搜索的限制把它一起挡了。"""
+        captured = {}
+
+        def fake_get(self, url, **kw):
+            captured["url"] = url
+            return httpx.Response(
+                200,
+                json={"data": {"user": {"result": {"rest_id": "42"}}}},
+                request=httpx.Request("GET", url),
+            )
+
+        monkeypatch.setattr(httpx.Client, "get", fake_get)
+        assert self._backend().user_id("OpenAI") == "42"
+        assert "UserByScreenName" in captured["url"]

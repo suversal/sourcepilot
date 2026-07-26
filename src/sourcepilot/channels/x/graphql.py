@@ -8,10 +8,18 @@ xcancel 要 RSS 白名单，X 自己的 guest token 虽然还能激活，但旧�
 
   第一层  cookie + ct0 csrf + 公开 Bearer      —— 必需
   第二层  TLS/JA3 指纹伪装（curl_cffi）        —— 撞 Cloudflare 时才开
-  第三层  x-client-transaction-id 动态签名     —— 见 signature.py，X 强制时才开
+  第三层  x-client-transaction-id 动态签名     —— **搜索必需，时间线不需要**
 
-签名那层是最贵的（要跟着 X 前端改版走），所以做成可插拔：先不带它试，
-被拒了再挂上。`transaction_signer` 传 None 就是关闭。
+第三层原本打算「先不带它试，被拒了再挂」。这个假设已经在真实登录态浏览器里
+验证过了（2026-07-26），结论是**按 operation 分化的**：
+
+    UserByScreenName / UserTweets / UserMedia   不带签名 → 200
+    SearchTimeline                              不带签名 → 404
+                                                带截获的签名重放 → 仍 404
+
+最后那条说明签名带时间戳或 nonce、**一次性**，截获复用无效——必须能现场生成。
+所以时间线可以立刻用，搜索则绕不开复刻签名算法（见 SIGNED_OPERATIONS）。
+`transaction_signer` 传 None 就是关闭该层。
 """
 
 from __future__ import annotations
@@ -22,9 +30,25 @@ from typing import Any, Protocol
 
 import httpx
 
-from ...contracts import Item, Media, MediaType, Source, SourceType, TimeBasis, UpstreamDown
+from ...contracts import (
+    AuthExpired,
+    Item,
+    Media,
+    MediaType,
+    Source,
+    SourceType,
+    TimeBasis,
+    UpstreamDown,
+)
 from .accounts import Account, AccountPool
-from .config import DEFAULT_FEATURES, GRAPHQL_BASE, OPERATIONS, PUBLIC_BEARER, USER_FEATURES
+from .config import (
+    DEFAULT_FEATURES,
+    GRAPHQL_BASE,
+    OPERATIONS,
+    PUBLIC_BEARER,
+    SIGNED_OPERATIONS,
+    USER_FEATURES,
+)
 
 log = logging.getLogger("sourcepilot.channels.x")
 
@@ -211,6 +235,12 @@ class GraphQLBackend:
         query_id = OPERATIONS.get(operation)
         if not query_id:
             raise UpstreamDown(f"没有配置 {operation} 的 operation id")
+        if operation in SIGNED_OPERATIONS and self.signer is None:
+            # 与其发出去等一个语焉不详的 404，不如直接说清楚缺什么。
+            raise AuthExpired(
+                f"{operation} 需要 x-client-transaction-id 签名，但未配置签名器。"
+                f"该签名是一次性的，不能截获复用——见 channels/x/config.py 的实测记录"
+            )
 
         path = f"/{query_id}/{operation}"
         params = {
