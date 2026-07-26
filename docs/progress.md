@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.1.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
 | 2 | REST + SKILL.md + 首个信源 | ⚠️ 基本完成 | 声明式引擎（JSON/HTML/RSS）、22 个信源、3 个端点、后台调度器、[SKILL.md](../SKILL.md) | 127 项离线测试 + 真实 uvicorn curl 验证 |
-| 3 | X 后端（签名/账号池/限流） | 🔶 时间线可用，搜索卡在签名 | 三后端路由（fxtwitter/nitter/graphql）、账号池 + 限流状态机、`search_x` 现查降级链、两个 REST 端点 | 30 项离线测试；**免登录部分真实跑通**（Nitter 时间线、FxTwitter 单推）；**GraphQL 搜索待你配 cookie 后验证** |
+| 3 | X 后端（签名/账号池/限流） | 🔶 全部实现，待配 cookie 跑通 | 三后端路由（fxtwitter/nitter/graphql）、账号池 + 限流状态机、`search_x` 现查降级链、两个 REST 端点 | 30 项离线测试；**免登录部分真实跑通**（Nitter 时间线、FxTwitter 单推）；**GraphQL 搜索待你配 cookie 后验证** |
 | 4 | 可靠性层（Canary/故障转移/代理） | ⬜ 未开始 | — | — |
 | 5 | MCP 出口 | ⬜ 未开始 | — | — |
 | 6 | 迁 RSS + 公众号 channel | ✅ 完成 | RSS 提取器、公众号 channel（mp 后端 + 冷却状态机）、`/api/v1/wechat/feed` | 27 项离线测试 + **真实凭据端到端跑通**：量子位/机器之心共 34 条入库 |
@@ -109,6 +109,9 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | **免登录搜 X 已无路可走** | 实测 2026-07-26：Nitter 各实例搜索一律返回 0 条（搜索最费上游配额，是各实例最先关的功能）；xcancel 要 RSS 客户端白名单；X guest token 还能激活但旧的 `/2/search/adaptive.json` 已下线 | `search_x` 只能走登录态 GraphQL。时间线不受影响——Nitter 的时间线实测可用（19 条真推文） |
 | X operation id 会随前端发版轮换 | GraphQL 的 queryId 过期表现为 404 | 抽在 `channels/x/config.py` 的 `OPERATIONS` 里，改版=改配置。404 的报错信息直接提示去改那个文件 |
 | **签名密钥必须从登录态页面解析** | 匿名访问 x.com 拿到的是 `entry-client-logged-out-*.js` 入口，那个 bundle 里**没有签名脚本**（实测：匿名 35KB/1 chunk，带 cookie 271KB/3 chunk）。twscrape 源码里也有同样的判断，直接抛「Logged-out X web app」 | 签名器改成必须传 cookie，拿到匿名版页面时立刻报清楚原因 |
+| ✅ **签名已实现并端到端验证** | 用自己实现的生成器产出签名，打真实 `SearchTimeline` 拿到 **200 / 133KB / 20 条推文**；同一端点不带签名是 404。anim_key 与独立写的 JS 实现在两组真实输入上逐字符一致 | 见 `channels/x/signature.py`。剩下的只差把 `auth_token` 填进 `config/x_accounts.yaml` |
+| verification key 每次请求都变 | 同一页面连续两次抓取拿到完全不同的 48 字节 | 取 key、算 anim_key、发请求必须在一次会话里连贯完成，不能跨请求缓存 key |
+| 老版 webpack 构建要重建 chunk 地址 | 登录态页面用的是 responsive-web 老构建，签名脚本 `ondemand.s` 不在 HTML 里，要从页面内两张映射表（683 条哈希 + 616 条名称）拼出地址 | 已实现重建分支。**踩过的坑**：chunk 正则若把 responsive-web 也算进去，会误判成新版而跳过重建，整条路就断了 |
 | **搜索强制签名，且签名一次性** | 在真实登录态浏览器里对照验证（2026-07-26）：`UserByScreenName`/`UserTweets`/`UserMedia` 不带签名一律 200；`SearchTimeline` 不带签名 404，**带浏览器刚生成的签名重放依然 404**。最后一条说明签名带时间戳或 nonce，截获不能复用 | 时间线立刻可用；搜索绕不开复刻 twscrape 的 xclid 算法。代码里 `SIGNED_OPERATIONS` 记着这个分化，缺签名器时直接报清楚原因而不是发出去等 404 |
 | operation id 与 features 曾经全部过期 | 我凭记忆写的三个 operation id 实测全错，features 也差十几项 | 已用浏览器抓的真实请求校正。这次改动全部集中在 config.py，逻辑一行没动——印证了「常量抽文件」的价值 |
 | 文章列表要用 list_ex 不是 appmsgpublish | 参考项目 we-mp-rss 用的是 `appmsgpublish`，返回转义两层的 publish_page（publish_list → publish_info → appmsgex），解析链长且脆；实测同一个号 `appmsg?action=list_ex` 直接给扁平的 app_msg_list，一次 20 条、字段齐全 | 已改用 list_ex，并加测试钉住端点选择 |

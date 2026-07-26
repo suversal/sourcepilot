@@ -14,8 +14,14 @@ SHA256，拼上混淆字节，base64 —— 就是那个头。
 算法参考 twscrape 的 `xclid.py`（MIT）。这里是自己的实现，但每一步都必须与 X 前端
 逐位对齐——差一个字节签名就废，所以下面的常量和取整方式都不能"优化"。
 
-**它会随 X 前端改版而失效**，表现为签名被拒（404）。届时 `refresh()` 重新解析页面；
-若结构本身变了，要改的是本文件的选择器与正则。
+**已端到端验证**（2026-07-26）：用本模块生成的签名打真实 `SearchTimeline`，
+返回 200 / 133KB / 20 条推文——而同一端点不带签名是 404。
+
+**它会随 X 前端改版而失效**，表现为签名被拒（404）。届时重新构造一个签名器即可；
+若页面结构本身变了，要改的是本文件的选择器与正则。
+
+一个容易踩的坑：**verification key 每次请求都不同**，所以取 key、算 anim_key、
+发请求必须在一次会话里连贯做完，不能缓存 key 跨请求复用。
 """
 
 from __future__ import annotations
@@ -44,8 +50,16 @@ HOME_URL = "https://x.com/tesla"  # 随便一个稳定存在的公开主页即�
 #: 所以解析密钥必须带账号 cookie，这不是可选项。
 LOGGED_OUT_ENTRY_RE = re.compile(r"entry-client-logged-out[-.][^/?#]*\.js")
 
-#: 页面里引用的 bundle chunk。X 从 responsive-web 换到了 x-web，两种都要认。
-ASSET_URL_RE = re.compile(r"https://[\w.-]+/(?:x-web|responsive-web)/[\w./-]+\.js")
+#: 新版 x-web 构建：chunk 直接以完整 URL 写在页面里。
+#: **只认 x-web**——老版 responsive-web 的 vendor/en/main 也是完整 URL，但那三个
+#: 里没有签名脚本；把它们算进来会让代码误以为「已经是新版」而跳过下面的重建分支。
+#: 这个坑我踩过：正则写宽一格，整条路就断了。
+ASSET_URL_RE = re.compile(r"https://[\w.-]+/x-web/[\w./-]+\.js")
+#: 老版 webpack 构建：页面里嵌两张映射表，chunk 地址得自己拼。
+CHUNK_BASE = "https://abs.twimg.com/responsive-web/client-web"
+HASH_MAP_RE = re.compile(r'(\d+):"([0-9a-f]{7})"')
+NAME_MAP_RE = re.compile(r'(\d+):"([^"]+)"')
+HEX7_RE = re.compile(r"[0-9a-f]{7}")
 #: 存放动画索引的文件：老版本直接叫 ondemand.s.*.js，新版本是 chunk 里动态 import 的
 #: sign.o-*.js。`\b` 是为了别把 design.o-*.js 这种误当成它。
 INDICES_FILE_RE = re.compile(r"(?:\.{0,2}/)?[\w./-]*?\b(?:ondemand\.s|sign\.o)[\w.-]*\.js")
@@ -213,7 +227,20 @@ def _find_indices_script(
     """
     scripts = list(dict.fromkeys(ASSET_URL_RE.findall(html)))
     if not scripts:
-        raise SignatureUnavailable("页面里找不到任何 bundle chunk")
+        # 老版 webpack 构建：没有现成的 chunk URL，从页面里的两张映射表重建。
+        #   哈希表  {chunk_id: "7位十六进制"}
+        #   名称表  {chunk_id: "可读名"}     —— 值不是 7 位十六进制的那些
+        #   地址     {base}/{名称或id}.{哈希}a.js      注意末尾那个 a
+        hash_map = dict(HASH_MAP_RE.findall(html))
+        if not hash_map:
+            raise SignatureUnavailable("页面里既没有 chunk 链接也没有 webpack 映射表")
+        name_map = {
+            cid: name for cid, name in NAME_MAP_RE.findall(html) if not HEX7_RE.fullmatch(name)
+        }
+        scripts = [
+            f"{CHUNK_BASE}/{name_map.get(cid, cid)}.{digest}a.js"
+            for cid, digest in hash_map.items()
+        ]
 
     direct = [s for s in scripts if INDICES_FILE_RE.search(s)]
     if direct:

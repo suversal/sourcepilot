@@ -412,3 +412,46 @@ class TestTransactionSignature:
         c = CubicCurve([0.25, 0.1, 0.25, 1.0])
         assert c.value_at(0.0) == pytest.approx(0.0, abs=1e-6)
         assert 0.0 < c.value_at(0.5) < 1.5
+
+
+class TestSignatureAgainstRealData:
+    """用 2026-07-26 从真实页面取到的数据固化算法。
+
+    这组输入取自登录态的 x.com，用它算出的签名打真实 SearchTimeline 拿到了
+    200 / 20 条推文。算法一旦被"优化"坏，这里就会红。
+    """
+
+    #: 真实 verification key（48 字节）。它每次请求都会变，这里只作算法回归用。
+    VK = [
+        205, 204, 105, 236, 206, 244, 10, 67, 214, 164, 190, 240, 120, 172, 246, 101,
+        119, 13, 53, 78, 93, 195, 65, 107, 249, 66, 136, 185, 208, 166, 28, 81,
+        143, 69, 187, 69, 225, 86, 166, 189, 68, 154, 118, 177, 83, 33, 185, 167,
+    ]
+    FRAME = [81.0, 61.0, 19.0, 90.0, 160.0, 44.0, 220.0, 235.0, 156.0, 224.0, 79.0]
+
+    def test_anim_key_matches_independent_implementation(self):
+        """同一份真实输入，独立写的 JS 实现算出的也是这个值。"""
+        from sourcepilot.channels.x.signature import calc_anim_key
+
+        assert calc_anim_key(self.FRAME, 0.0) == "513d13100100"
+
+    def test_another_real_frame(self):
+        """另一次抓取的真实帧，JS 侧同样算出 72a3c100100。"""
+        from sourcepilot.channels.x.signature import calc_anim_key
+
+        frame = [114.0, 10.0, 60.0, 84.0, 219.0, 238.0, 52.0, 63.0, 64.0, 41.0, 143.0]
+        assert calc_anim_key(frame, 0.0) == "72a3c100100"
+
+    def test_signature_payload_layout(self):
+        """签名体的布局必须是 vk(48) + 时间戳(4) + 哈希前 16 + 尾字节，共 69 字节。"""
+        import base64
+
+        from sourcepilot.channels.x.signature import XTransactionSigner
+
+        sig = XTransactionSigner(self.VK, "513d13100100").sign("GET", "/i/api/graphql/x/Y")
+        raw = base64.b64decode(sig + "=" * (-len(sig) % 4))
+        noise, body = raw[0], bytes(b ^ raw[0] for b in raw[1:])
+        assert len(body) == 48 + 4 + 16 + 1
+        assert list(body[:48]) == self.VK
+        assert body[-1] == 3
+        assert 0 <= noise <= 255
