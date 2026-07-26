@@ -39,6 +39,14 @@ class FieldSpec(BaseModel):
     template: str | None = Field(
         default=None, description="用 {字段名或路径} 占位；可加 |urlencode"
     )
+    pattern: str | None = Field(
+        default=None,
+        description=(
+            "取到值之后、转类型之前，先用这个正则抽出第一个捕获组。"
+            "用于「想要的东西埋在一段更长的字符串里」——比如锚点 id 是 "
+            "`2025-12-11-3`，日期只是它的前一段。"
+        ),
+    )
     type: Literal["str", "int", "float", "unix", "iso", "strptime", "slug"] = "str"
     format: str | None = Field(
         default=None,

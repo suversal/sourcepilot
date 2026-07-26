@@ -249,3 +249,51 @@ class TestSlug:
         (item,) = normalize(config, page)
         assert item.id == "hotlist:fakeslug_hello-world-part-2"
         assert str(item.url) == "https://example.com/p/hello-world-part-2"
+
+
+class TestPatternExtraction:
+    """想要的东西埋在更长的字符串里时，先按正则抽一段再转类型。"""
+
+    CONFIG = {
+        "name": "fakepat",
+        "display_name": "pattern 测试源",
+        "base_url": "https://example.com",
+        "request": {"url": "https://example.com/n"},
+        "extract": {
+            "format": "html",
+            "list": "div.u",
+            "fields": {
+                "native_id": {"select": ".", "attr": "id"},
+                "title": {"select": ".t"},
+                "url": {"template": "{base_url}/#{native_id}"},
+                # 同一天多条公告时 id 是 2025-12-11-3，日期只是前一段
+                "published_at": {
+                    "select": ".",
+                    "attr": "id",
+                    "pattern": r"^(\d{4}-\d{2}-\d{2})",
+                    "type": "iso",
+                },
+            },
+        },
+    }
+
+    PAGE = (
+        '<div class="u" id="2025-12-11-3"><span class="t">同日第三条</span></div>'
+        '<div class="u" id="2026-06-16"><span class="t">当日唯一一条</span></div>'
+    )
+
+    def test_date_extracted_from_suffixed_id(self):
+        """不抽的话解析失败 → published_at 为空 → 旧公告会混进近期窗口。"""
+        items = normalize(SourceConfig(**self.CONFIG), self.PAGE)
+        assert items[0].published_at.date().isoformat() == "2025-12-11"
+        assert items[0].time_basis is TimeBasis.PUBLISHED
+
+    def test_plain_id_still_works(self):
+        items = normalize(SourceConfig(**self.CONFIG), self.PAGE)
+        assert items[1].published_at.date().isoformat() == "2026-06-16"
+
+    def test_no_match_yields_none_not_garbage(self):
+        """抽不到就当没有——宁可缺字段也不要错字段。"""
+        from sourcepilot.sources.extract import apply_pattern
+
+        assert apply_pattern("没有日期", r"^(\d{4}-\d{2}-\d{2})") is None

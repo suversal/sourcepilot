@@ -101,6 +101,16 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
 
 
+def apply_pattern(value: Any, pattern: str | None) -> Any:
+    """按正则抽出第一个捕获组。抽不到就返回 None——宁可缺字段也不要错字段。"""
+    if pattern is None or value is None:
+        return value
+    match = re.search(pattern, str(value))
+    if match is None:
+        return None
+    return match.group(1) if match.groups() else match.group(0)
+
+
 def coerce(value: Any, kind: str, fmt: str | None = None) -> Any:
     if value is None:
         return None
@@ -147,7 +157,7 @@ def extract_row(
         if spec.template is not None:
             continue
         raw = select_html(row, spec) if is_html else resolve_path(row, spec.path or "")
-        value = coerce(raw, spec.type, spec.format)
+        value = coerce(apply_pattern(raw, spec.pattern), spec.type, spec.format)
         out[key] = spec.default if value is None else value
 
     for key, spec in fields.items():
@@ -156,7 +166,7 @@ def extract_row(
         raw = render_template(
             spec.template, row=row, extracted=out, base_url=base_url
         )
-        value = coerce(raw, spec.type, spec.format)
+        value = coerce(apply_pattern(raw, spec.pattern), spec.type, spec.format)
         out[key] = spec.default if value is None else value
 
     # 相对链接补全：模板里已经拼过 base_url 的不受影响（urljoin 对绝对地址是幂等的）。

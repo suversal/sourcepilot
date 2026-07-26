@@ -21,4 +21,6 @@ extract:
     title: { select: ".text-secondary" }
     url: { template: "https://docs.bigmodel.cn/cn/update/new-releases#{native_id}" }
     summary: { select: ".prose-sm" }
-    published_at: { select: ".", attr: id, type: iso }
+    # 同一天有多条公告时 id 会带序号后缀（2025-12-11-3），先把日期抽出来。
+    # 不抽的话解析失败 → published_at 为空 → 旧公告会被当成「刚收录」混进近期窗口。
+    published_at: { select: ".", attr: id, pattern: '^(\d{4}-\d{2}-\d{2})', type: iso }
