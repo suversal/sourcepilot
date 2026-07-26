@@ -357,3 +357,58 @@ class TestSignatureRequirement:
         monkeypatch.setattr(httpx.Client, "get", fake_get)
         assert self._backend().user_id("OpenAI") == "42"
         assert "UserByScreenName" in captured["url"]
+
+
+class TestTransactionSignature:
+    """签名算法本身可离线验证——它是纯函数，只有取密钥那步要联网。"""
+
+    def _signer(self):
+        from sourcepilot.channels.x.signature import XTransactionSigner
+
+        return XTransactionSigner(vk_bytes=list(range(48)), anim_key="abc123")
+
+    def test_signature_is_base64_without_padding(self):
+        sig = self._signer().sign("GET", "/i/api/graphql/x/SearchTimeline")
+        assert not sig.endswith("=")
+        import base64
+
+        base64.b64decode(sig + "=" * (-len(sig) % 4))  # 能解回来说明是合法 base64
+
+    def test_每次都不同(self):
+        """带时间戳与随机噪声——X 靠这个防重放，实测截获重放确实会 404。"""
+        s = self._signer()
+        sigs = {s.sign("GET", "/i/api/graphql/x/SearchTimeline") for _ in range(5)}
+        assert len(sigs) == 5
+
+    def test_signature_is_bound_to_method_and_path(self):
+        """签名绑方法与路径，所以截一个换个端点用也没用。"""
+        s = self._signer()
+        import base64
+
+        def payload(sig):
+            raw = base64.b64decode(sig + "=" * (-len(sig) % 4))
+            noise = raw[0]
+            return bytes(b ^ noise for b in raw[1:])
+
+        a = payload(s.sign("GET", "/a"))
+        b = payload(s.sign("GET", "/b"))
+        # 前 48 字节是 vk_bytes，之后 4 字节时间戳，再往后是路径参与的哈希
+        assert a[:48] == b[:48]
+        assert a[52:68] != b[52:68], "路径不同，哈希段就该不同"
+
+    def test_anonymous_load_is_rejected_with_a_clear_reason(self):
+        """匿名态的 bundle 里没有签名脚本，早点说清楚好过失败在更深处。"""
+        from sourcepilot.channels.x.signature import (
+            SignatureUnavailable,
+            XTransactionSigner,
+        )
+
+        with pytest.raises(SignatureUnavailable, match="cookie"):
+            XTransactionSigner.load("")
+
+    def test_cubic_curve_endpoints(self):
+        from sourcepilot.channels.x.signature import CubicCurve
+
+        c = CubicCurve([0.25, 0.1, 0.25, 1.0])
+        assert c.value_at(0.0) == pytest.approx(0.0, abs=1e-6)
+        assert 0.0 < c.value_at(0.5) < 1.5

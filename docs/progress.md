@@ -108,6 +108,7 @@ SKILL.md 里也写明让 Agent 如实说「这个信源还没接」。
 | 搜狗给的是限时链接 | 还原出的 `mp.weixin.qq.com/s?src=11&timestamp=…&signature=…` 几小时到一天后失效 | 条目 `raw.link_expires=true` 标注。这是降级路线的固有代价，主力（公众平台）给的是永久链接 |
 | **免登录搜 X 已无路可走** | 实测 2026-07-26：Nitter 各实例搜索一律返回 0 条（搜索最费上游配额，是各实例最先关的功能）；xcancel 要 RSS 客户端白名单；X guest token 还能激活但旧的 `/2/search/adaptive.json` 已下线 | `search_x` 只能走登录态 GraphQL。时间线不受影响——Nitter 的时间线实测可用（19 条真推文） |
 | X operation id 会随前端发版轮换 | GraphQL 的 queryId 过期表现为 404 | 抽在 `channels/x/config.py` 的 `OPERATIONS` 里，改版=改配置。404 的报错信息直接提示去改那个文件 |
+| **签名密钥必须从登录态页面解析** | 匿名访问 x.com 拿到的是 `entry-client-logged-out-*.js` 入口，那个 bundle 里**没有签名脚本**（实测：匿名 35KB/1 chunk，带 cookie 271KB/3 chunk）。twscrape 源码里也有同样的判断，直接抛「Logged-out X web app」 | 签名器改成必须传 cookie，拿到匿名版页面时立刻报清楚原因 |
 | **搜索强制签名，且签名一次性** | 在真实登录态浏览器里对照验证（2026-07-26）：`UserByScreenName`/`UserTweets`/`UserMedia` 不带签名一律 200；`SearchTimeline` 不带签名 404，**带浏览器刚生成的签名重放依然 404**。最后一条说明签名带时间戳或 nonce，截获不能复用 | 时间线立刻可用；搜索绕不开复刻 twscrape 的 xclid 算法。代码里 `SIGNED_OPERATIONS` 记着这个分化，缺签名器时直接报清楚原因而不是发出去等 404 |
 | operation id 与 features 曾经全部过期 | 我凭记忆写的三个 operation id 实测全错，features 也差十几项 | 已用浏览器抓的真实请求校正。这次改动全部集中在 config.py，逻辑一行没动——印证了「常量抽文件」的价值 |
 | 文章列表要用 list_ex 不是 appmsgpublish | 参考项目 we-mp-rss 用的是 `appmsgpublish`，返回转义两层的 publish_page（publish_list → publish_info → appmsgex），解析链长且脆；实测同一个号 `appmsg?action=list_ex` 直接给扁平的 app_msg_list，一次 20 条、字段齐全 | 已改用 list_ex，并加测试钉住端点选择 |

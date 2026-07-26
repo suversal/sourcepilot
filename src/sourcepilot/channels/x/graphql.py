@@ -217,6 +217,25 @@ class GraphQLBackend:
         self.timeout = timeout
         self.impersonate = impersonate
         self.signer = transaction_signer
+        self._signer_tried = transaction_signer is not None
+
+    def _ensure_signer(self, account: Account):
+        """按需解析签名密钥。
+
+        只在真要用签名的 operation 上才做——解析要拉页面和若干 MB 的 chunk，
+        时间线那类不需要签名的请求不该为此付代价。
+        """
+        if self._signer_tried:
+            return self.signer
+        self._signer_tried = True
+        try:
+            from .signature import XTransactionSigner
+
+            self.signer = XTransactionSigner.load(account.cookie, account.user_agent)
+        except Exception as exc:
+            log.warning("X 签名密钥解析失败：%s", exc)
+            self.signer = None
+        return self.signer
 
     def available(self) -> bool:
         return bool(self.pool.accounts)
@@ -235,10 +254,10 @@ class GraphQLBackend:
         query_id = OPERATIONS.get(operation)
         if not query_id:
             raise UpstreamDown(f"没有配置 {operation} 的 operation id")
-        if operation in SIGNED_OPERATIONS and self.signer is None:
+        if operation in SIGNED_OPERATIONS and self._ensure_signer(account) is None:
             # 与其发出去等一个语焉不详的 404，不如直接说清楚缺什么。
             raise AuthExpired(
-                f"{operation} 需要 x-client-transaction-id 签名，但未配置签名器。"
+                f"{operation} 需要 x-client-transaction-id 签名，但密钥解析失败。"
                 f"该签名是一次性的，不能截获复用——见 channels/x/config.py 的实测记录"
             )
 
