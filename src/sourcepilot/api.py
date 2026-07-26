@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .article import ArticleService
 from .canary import Canary
+from .channels.cooldown import COOLDOWNS
 from .collector import Collector, Scheduler
 from .contracts import (
     API_PREFIX,
@@ -70,6 +71,9 @@ def create_app(
                 level=logging.INFO,
                 format="%(asctime)s %(levelname)s %(name)s: %(message)s",
             )
+        # 把上次的冷却读回来。不这样的话重启一次冷却就清零，真被封号时
+        # 重启一下就又去捅了——那是账号安全问题。
+        COOLDOWNS.bind(store)
         # 没有后台采集，只有被 /hotlist 打到的源会更新，厂商发布那类永远是空的。
         if scheduler:
             background.start()

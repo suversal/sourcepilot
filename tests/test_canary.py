@@ -129,3 +129,61 @@ class TestSummary:
         summary = canary.summary(NOW)
         assert summary["problems"] == []
         assert summary["counts"]["ok"] == 2
+
+
+class TestCooldownPersistence:
+    """冷却必须落盘。
+
+    只放进程内的话，重启一次就清零——真被封号时重启一下就又去捅了。
+    这是账号安全问题，不是体验问题。
+    """
+
+    def test_survives_a_restart(self, store):
+        from sourcepilot.channels.cooldown import CooldownRegistry
+
+        first = CooldownRegistry(store)
+        first.penalize("x:acct1", ErrorCode.AUTH_EXPIRED)
+        assert first.blocked("x:acct1") is True
+
+        # 模拟进程重启：全新的注册表，只能靠库恢复
+        second = CooldownRegistry(store)
+        assert second.blocked("x:acct1") is True
+        assert second.reason("x:acct1") is ErrorCode.AUTH_EXPIRED
+
+    def test_expired_entries_are_not_restored(self, store):
+        """过期的不该复活，否则重启会凭空延长冷却。"""
+        from datetime import timedelta
+
+        from sourcepilot.channels.cooldown import CooldownRegistry
+
+        store.save_cooldown(
+            "old", datetime.now(UTC) - timedelta(minutes=1), ErrorCode.RATE_LIMITED.value
+        )
+        assert CooldownRegistry(store).blocked("old") is False
+
+    def test_clear_removes_it_from_disk_too(self, store):
+        from sourcepilot.channels.cooldown import CooldownRegistry
+
+        reg = CooldownRegistry(store)
+        reg.penalize("b", ErrorCode.CAPTCHA)
+        reg.clear("b")
+        assert CooldownRegistry(store).blocked("b") is False
+
+    def test_without_a_store_it_still_works_in_memory(self):
+        """没挂 Store 时退化成纯内存——测试和临时脚本不该被迫建库。"""
+        from sourcepilot.channels.cooldown import CooldownRegistry
+
+        reg = CooldownRegistry()
+        reg.penalize("c", ErrorCode.RATE_LIMITED)
+        assert reg.blocked("c") is True
+
+    def test_storage_failure_does_not_break_the_in_memory_penalty(self, store, monkeypatch):
+        """落盘失败时内存里的冷却仍要生效——宁可少一层保险，不能当场不冷却。"""
+        from sourcepilot.channels.cooldown import CooldownRegistry
+
+        reg = CooldownRegistry(store)
+        monkeypatch.setattr(
+            store, "save_cooldown", lambda *a: (_ for _ in ()).throw(RuntimeError("盘满了"))
+        )
+        reg.penalize("d", ErrorCode.AUTH_EXPIRED)
+        assert reg.blocked("d") is True

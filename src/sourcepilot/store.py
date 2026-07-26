@@ -52,6 +52,12 @@ CREATE INDEX IF NOT EXISTS idx_items_discovered ON items(discovered_at DESC, id 
 CREATE INDEX IF NOT EXISTS idx_items_platform   ON items(platform, score DESC);
 CREATE INDEX IF NOT EXISTS idx_items_type       ON items(source_type, discovered_at DESC);
 
+CREATE TABLE IF NOT EXISTS cooldowns (
+    key         TEXT PRIMARY KEY,
+    until       TEXT NOT NULL,
+    error_code  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS source_state (
     name                 TEXT PRIMARY KEY,
     last_attempt_at      TEXT,
@@ -270,6 +276,31 @@ class Store:
                 """,
                 (name, _iso(at), code.value),
             )
+
+
+    # ---------- 冷却 ----------
+    # 冷却必须落盘：进程内的话，重启一次就会立刻去捅一个刚被封的账号。
+    # 这是账号安全问题，不是体验问题。
+
+    def save_cooldown(self, key: str, until: datetime, code: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO cooldowns VALUES (?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET until=excluded.until, "
+                "error_code=excluded.error_code",
+                (key, _iso(until), code),
+            )
+
+    def load_cooldowns(self, now: datetime) -> dict[str, tuple[datetime, str]]:
+        """读出仍在生效的冷却，顺手清掉过期的。"""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM cooldowns WHERE until <= ?", (_iso(now),))
+            rows = conn.execute("SELECT key, until, error_code FROM cooldowns").fetchall()
+        return {r["key"]: (_parse(r["until"]), r["error_code"]) for r in rows}  # type: ignore[misc]
+
+    def clear_cooldown(self, key: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM cooldowns WHERE key = ?", (key,))
 
 
 def _row_to_item(row: sqlite3.Row) -> Item:

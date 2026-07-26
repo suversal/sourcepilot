@@ -7,8 +7,9 @@
 公众号 channel 先用上了它；X 的多后端路由与账号池是同一套需求，所以提到这里共用，
 免得两边各写一份、判断迟早不一致。
 
-状态放在进程内：调度器是常驻的，进程重启本来就该给每条路一次重试机会。
-持久化已记进待办（重启后不该立刻去捅一个刚被封的账号）。
+**状态会落盘**。早先只放在进程内，那意味着重启一次冷却就清零——真被封号时
+重启一下就又去捅了。那是账号安全问题，不是体验问题，所以现在挂上 Store 之后
+会把冷却写进 SQLite，进程重启后照样生效。没挂 Store 时退化成纯内存（测试用）。
 """
 
 from __future__ import annotations
@@ -51,8 +52,34 @@ class _Entry:
 class CooldownRegistry:
     """按名字记冷却。名字可以是后端名（`fxtwitter`）或账号名（`x:acct_3`）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, store=None) -> None:
         self._entries: dict[str, _Entry] = {}
+        self._store = store
+        if store is not None:
+            self._load()
+
+    def bind(self, store) -> None:
+        """挂上持久化。服务启动时调用一次，把上次的冷却读回来。"""
+        self._store = store
+        self._load()
+
+    def _load(self) -> None:
+        import time as _t
+        from datetime import UTC, datetime
+
+        try:
+            saved = self._store.load_cooldowns(datetime.now(UTC))
+        except Exception as exc:  # 读不出来不该拖垮启动
+            log.warning("读取持久化冷却失败：%s", exc)
+            return
+        now_wall, now_mono = datetime.now(UTC).timestamp(), _t.time()
+        for key, (until, code) in saved.items():
+            # 存的是墙上时间，内存里用的是 time.time()，两者换算一下。
+            self._entries[key] = _Entry(
+                until=now_mono + (until.timestamp() - now_wall), code=ErrorCode(code)
+            )
+        if self._entries:
+            log.info("从库里恢复了 %d 条仍在生效的冷却", len(self._entries))
 
     def penalize(
         self, key: str, code: ErrorCode, now: float | None = None, seconds: int | None = None
@@ -62,6 +89,15 @@ class CooldownRegistry:
         now = now if now is not None else time.time()
         self._entries[key] = _Entry(until=now + span, code=code)
         log.warning("%s 因 %s 冷却 %d 秒", key, code.value, span)
+        if self._store is not None:
+            from datetime import UTC, datetime, timedelta
+
+            try:
+                self._store.save_cooldown(
+                    key, datetime.now(UTC) + timedelta(seconds=span), code.value
+                )
+            except Exception as exc:
+                log.warning("冷却落盘失败（内存里仍生效）：%s", exc)
         return span
 
     def blocked(self, key: str, now: float | None = None) -> bool:
@@ -88,8 +124,14 @@ class CooldownRegistry:
     def clear(self, key: str) -> None:
         """成功一次就解除冷却——上一次的故障已经过去了。"""
         self._entries.pop(key, None)
+        if self._store is not None:
+            try:
+                self._store.clear_cooldown(key)
+            except Exception as exc:
+                log.warning("清除持久化冷却失败：%s", exc)
 
     def reset(self) -> None:
+        """只清内存，不动库——测试用。"""
         self._entries.clear()
 
 
