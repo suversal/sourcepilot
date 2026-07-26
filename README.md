@@ -7,7 +7,7 @@
 这条边界贯穿全部设计，下文会反复提到它为什么重要。
 
 ```
-24 个信源 · 6 个工具 · 4 个出口 · 315 项测试
+44 个信源 · 6 个工具 · 4 个出口 · 345 项测试
 ```
 
 ---
@@ -74,39 +74,66 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 
 ## 信源清单
 
-24 个启用源，实测数据量（截至最近一次运行）：
+44 个启用源，实测数据量（截至最近一次运行）：
 
 ### 厂商官方发布（`source=vendor`，一手信息）
 
 | 源 | 抓取方式 | 条目 |
 |---|---|---|
 | OpenAI | RSS | 1050 |
+| Google DeepMind | RSS | 100 |
+| Hugging Face | RSS | 100 |
 | 通义千问 Qwen | RSS | 44 |
 | 智谱 GLM | HTML（开放平台更新日志） | 24 |
+| AWS 机器学习 | RSS | 20 |
 | Google AI | RSS | 20 |
+| NVIDIA | RSS | 18 |
 | DeepSeek | HTML（api-docs 侧栏） | 15 |
 | Anthropic | HTML（/news 列表页） | 12 |
-| Kimi（月之暗面） | HTML | 8 |
 | 字节 Seed | HTML + 标题 slug 推导 | 8 |
+| Kimi（月之暗面） | HTML | 8 |
 
 ### 平台热榜（`source=hotlist`）
 
 | 源 | 抓取方式 | 条目 |
 |---|---|---|
-| 今日头条 | JSON | 303 |
-| AIHOT | JSON | 173 |
-| IT之家 | HTML | 145 |
-| B站排行榜 | JSON | 141 |
-| Hacker News | JSON（Algolia 官方 API） | 105 |
-| LINUX DO | JSON（**需 TLS 指纹伪装**） | 95 |
+| 今日头条 | JSON | 374 |
+| AIHOT | JSON | 189 |
+| IT之家 | RSS | 171 |
+| B站排行榜 | JSON | 152 |
+| Hacker News | JSON（Algolia 官方 API） | 116 |
+| LINUX DO | JSON（**需 TLS 指纹伪装**） | 112 |
 | Product Hunt | RSS | 92 |
-| 36氪 | HTML | 54 |
-| 掘金 | JSON | 52 |
-| 远景论坛 | RSS | 33 |
+| 36氪 | RSS | 85 |
+| 掘金 | JSON | 61 |
+| 远景论坛 | RSS | 34 |
 | 少数派 | JSON | 31 |
-| V2EX | JSON | 24 |
-| Solidot | RSS | 21 |
-| GitHub Trending | HTML | 18 |
+| V2EX | JSON | 28 |
+| GitHub Trending | HTML | 25 |
+| Solidot | RSS | 24 |
+
+### 媒体 · 研究 · 社区（`source=rss`）
+
+2026-07-26 从 AIRADAR 迁入，全部走官方 RSS。
+
+| 源 | 条目 |
+|---|---|
+| Smol AI News | 100 |
+| Simon Willison | 30 |
+| Reddit r/LocalLLaMA | 25 |
+| Reddit r/MachineLearning | 25 |
+| 爱范儿 | 20 |
+| InfoQ 中国 | 20 |
+| Latent Space | 20 |
+| TechCrunch AI | 20 |
+| TLDR AI | 20 |
+| BAIR 伯克利 | 10 |
+| MIT 科技评论 AI | 10 |
+| 微软研究院 | 10 |
+| 量子位官网 | 10 |
+| The Decoder | 10 |
+| The Verge AI | 10 |
+| VentureBeat AI | 7 |
 
 ### 微信公众号（`source=wechat`）
 

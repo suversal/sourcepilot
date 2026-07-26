@@ -1,0 +1,13 @@
+name: tldrai
+display_name: TLDR AI
+type: rss
+platform: tldrai
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://tldr.tech/api/rss/ai
+
+extract:
+  format: rss

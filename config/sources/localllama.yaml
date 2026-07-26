@@ -1,0 +1,17 @@
+# Reddit 的 RSS 对默认 UA 很敏感——实测 python-httpx 的默认 UA 直接 429。
+# 换成带联系方式的自报家门 UA 就能过，这也是 Reddit 文档要求的做法。
+name: localllama
+display_name: Reddit r/LocalLLaMA
+type: rss
+platform: localllama
+enabled: true
+min_interval: 7200
+lang: en
+
+request:
+  url: https://www.reddit.com/r/LocalLLaMA/.rss
+  headers:
+    User-Agent: "SourcePilot/1.0 (+https://github.com/suversal/sourcepilot)"
+
+extract:
+  format: rss

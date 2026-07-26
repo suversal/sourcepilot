@@ -297,3 +297,68 @@ class TestPatternExtraction:
         from sourcepilot.sources.extract import apply_pattern
 
         assert apply_pattern("没有日期", r"^(\d{4}-\d{2}-\d{2})") is None
+
+
+class TestSummaryClipping:
+    """RSS 的 description 常常直接放全文——实测 BAIR 17873 字、VentureBeat 13176 字。
+
+    契约 §2 说 summary 是「客观摘要，抽取式」。原样收下会让 /items?limit=50
+    的响应涨到几百 KB，而下游真要全文该走 read_article。
+    """
+
+    def test_short_summary_is_untouched(self):
+        from sourcepilot.sources.engine import clip_summary
+
+        assert clip_summary("一句短摘要") == "一句短摘要"
+
+    def test_long_summary_is_clipped(self):
+        from sourcepilot.sources.engine import SUMMARY_MAX_CHARS, clip_summary
+
+        assert len(clip_summary("啊" * 5000)) <= SUMMARY_MAX_CHARS + 1
+
+    def test_prefers_a_sentence_boundary(self):
+        """切在半句话中间读起来是坏的。"""
+        from sourcepilot.sources.engine import clip_summary
+
+        text = "第一句。" + "填" * 500 + "。" + "尾巴" * 200
+        assert clip_summary(text).endswith("。")
+
+    def test_falls_back_to_a_hard_cut(self):
+        """整段没有一个句号时不能因此放弃截断。"""
+        from sourcepilot.sources.engine import SUMMARY_MAX_CHARS, clip_summary
+
+        out = clip_summary("无标点" * 1000)
+        assert out.endswith("…") and len(out) <= SUMMARY_MAX_CHARS + 1
+
+    def test_empty_stays_none(self):
+        from sourcepilot.sources.engine import clip_summary
+
+        assert clip_summary(None) is None
+        assert clip_summary("") is None
+
+
+class TestRssGuidNormalisation:
+    """很多 RSS 直接拿链接当 guid，那串链接常带入口标记。
+
+    36氪的 feed 给每条挂 `?f=rss`。不规范化的话，同一篇文章从 RSS 和从
+    列表页进来会得到两个不同的 id，在信息流里变成两条。
+    """
+
+    CONFIG = {
+        "name": "guidsrc",
+        "display_name": "拿链接当 guid 的源",
+        "platform": "guidsrc",
+        "request": {"url": "https://example.com/feed"},
+        "extract": {"format": "rss"},
+    }
+
+    FEED = """<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+    <item><title>某条</title><link>https://example.com/p/1?f=rss</link>
+    <guid>https://example.com/p/1?f=rss</guid></item></channel></rss>"""
+
+    def test_tracking_param_is_stripped_from_the_id(self):
+        from sourcepilot.sources import SourceConfig, engine
+
+        (item,) = engine.normalize(SourceConfig(**self.CONFIG), self.FEED)
+        assert "?f=rss" not in item.id
+        assert item.id.endswith("https://example.com/p/1")

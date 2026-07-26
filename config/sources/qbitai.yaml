@@ -1,0 +1,13 @@
+name: qbitai
+display_name: 量子位官网
+type: rss
+platform: qbitai
+enabled: true
+min_interval: 14400
+lang: zh
+
+request:
+  url: https://www.qbitai.com/feed
+
+extract:
+  format: rss

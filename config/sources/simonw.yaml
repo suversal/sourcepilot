@@ -1,0 +1,13 @@
+name: simonw
+display_name: Simon Willison 博客
+type: rss
+platform: simonw
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://simonwillison.net/atom/everything/
+
+extract:
+  format: rss

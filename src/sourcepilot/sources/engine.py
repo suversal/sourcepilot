@@ -39,8 +39,38 @@ TRACKING_PARAMS = frozenset(
         "log_pb", "impr_id", "category_name", "event_type", "style_id", "rank",
         "topic_id", "spm_id_from", "from_spmid", "vd_source", "seid",
         "ref", "ref_src", "from_source",
+        # RSS 入口标记。36氪的 feed 给每条都挂 ?f=rss，不剥掉的话同一篇文章
+        # 从 RSS 和从列表页进来会变成两条不同的 id。
+        "f",
     }
 )
+
+
+#: summary 的字符上限。契约 §2 定义 summary 是「客观摘要，抽取式」——
+#: 但很多 RSS 的 description 直接放全文（实测 BAIR 17873 字、VentureBeat 13176 字）。
+#: 原样收下会让 /items?limit=50 的响应涨到几百 KB，而下游真正需要全文时该走
+#: read_article，不是从信息流里顺出来。600 字够表达一段完整意思，也覆盖得住
+#: AIRADAR 初筛实际用到的 title + content[:500]。
+SUMMARY_MAX_CHARS = 600
+
+#: 优先在这些标点后断句，避免把话切在半截。
+_SENTENCE_ENDS = "。！？.!?\n"
+
+
+def clip_summary(text: str | None, limit: int = SUMMARY_MAX_CHARS) -> str | None:
+    """把过长的摘要截到 limit，尽量断在句子边界。
+
+    找不到合适的断句点就硬切加省略号——**宁可难看也不能让一条 1.7 万字的
+    「摘要」把整个响应撑爆**。
+    """
+    if not text or len(text) <= limit:
+        return text or None
+    head = text[:limit]
+    cut = max(head.rfind(ch) for ch in _SENTENCE_ENDS)
+    # 断点太靠前的话（不足一半）宁可硬切，否则会丢掉大半可用信息。
+    if cut >= limit // 2:
+        return head[: cut + 1]
+    return head.rstrip() + "…"
 
 
 class NotModified(Exception):
@@ -311,11 +341,15 @@ def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None
             native_id, title, url = fields.get("native_id"), fields.get("title"), fields.get("url")
             if not native_id or not title or not url:
                 continue
+            if isinstance(native_id, str) and native_id.startswith(("http://", "https://")):
+                # 很多 RSS 直接拿链接当 guid，那串链接常带入口标记（36氪的 ?f=rss）。
+                # id 不规范化的话，同一篇文章从 RSS 和从列表页进来会变成两条。
+                native_id = normalize_url(native_id)
             if _is_excluded(config, fields):
                 continue
 
             published_at = fields.get("published_at")
-            summary = fields.get("summary")
+            summary = clip_summary(fields.get("summary"))
             media = (
                 [Media(type=MediaType.IMAGE, url=fields["image"])]
                 if fields.get("image")

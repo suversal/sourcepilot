@@ -1,0 +1,19 @@
+# Reddit 的 RSS 对默认 UA 很敏感——实测 python-httpx 的默认 UA 直接 429。
+# 换成带联系方式的自报家门 UA 就能过，这也是 Reddit 文档要求的做法。
+# 间隔特意与 localllama 错开（2h vs 3h）——两个 reddit 源落在同一轮采集时，
+# 第二个必被限流。错开周期让它们大部分时候不同轮。
+name: mlreddit
+display_name: Reddit r/MachineLearning
+type: rss
+platform: mlreddit
+enabled: true
+min_interval: 10800
+lang: en
+
+request:
+  url: https://www.reddit.com/r/MachineLearning/.rss
+  headers:
+    User-Agent: "SourcePilot/1.0 (+https://github.com/suversal/sourcepilot)"
+
+extract:
+  format: rss

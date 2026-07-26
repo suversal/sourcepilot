@@ -1,0 +1,13 @@
+name: mittr
+display_name: MIT 科技评论 AI
+type: rss
+platform: mittr
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://www.technologyreview.com/topic/artificial-intelligence/feed
+
+extract:
+  format: rss

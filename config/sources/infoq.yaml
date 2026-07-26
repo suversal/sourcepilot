@@ -1,0 +1,13 @@
+name: infoq
+display_name: InfoQ 中国
+type: rss
+platform: infoq
+enabled: true
+min_interval: 14400
+lang: zh
+
+request:
+  url: https://www.infoq.cn/feed
+
+extract:
+  format: rss

@@ -1,0 +1,13 @@
+name: theverge
+display_name: The Verge AI
+type: rss
+platform: theverge
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+
+extract:
+  format: rss

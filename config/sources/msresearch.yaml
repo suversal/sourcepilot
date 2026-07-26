@@ -1,0 +1,13 @@
+name: msresearch
+display_name: 微软研究院
+type: rss
+platform: msresearch
+enabled: true
+min_interval: 21600
+lang: en
+
+request:
+  url: https://www.microsoft.com/en-us/research/feed/
+
+extract:
+  format: rss

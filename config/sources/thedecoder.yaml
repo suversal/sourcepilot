@@ -1,0 +1,13 @@
+name: thedecoder
+display_name: The Decoder
+type: rss
+platform: thedecoder
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://the-decoder.com/feed/
+
+extract:
+  format: rss

@@ -1,25 +1,23 @@
+# 2026-07-26 改用官方 RSS。原先抓 /list/ 列表页，实测对比：
+#   HTML 列表页  169 条，有时间，**摘要全空**
+#   官方 RSS      60 条，有时间，摘要 800+ 字
+# 摘要对下游是硬需求（AIRADAR 的初筛拿标题+摘要喂 LLM），空摘要等于让它裸判。
+# 条目数少了但每条更完整，且 RSS 结构比 CSS 选择器稳得多。
+# 这个源支持 ETag，条件请求能命中。
 name: ithome
 display_name: IT之家
 type: hotlist
 platform: ithome
 enabled: true
-min_interval: 300
+min_interval: 600
 lang: zh
 
 request:
-  url: https://www.ithome.com/list/
+  url: https://www.ithome.com/rss/
 
 extract:
-  format: html
-  list: "#list > div.fl > ul > li"
-  fields:
-    native_id: { select: "a.t", attr: href }
-    title: { select: "a.t" }
-    url: { select: "a.t", attr: href }
-    # a.c 的 data-ot 是带时区的完整 ISO（2026-07-25T23:11:17.257+08:00），
-    # 比 <i> 里那个不带时区的字符串可靠——后者会被当成 UTC，差 8 小时。
-    published_at: { select: "a.c", attr: data-ot, type: iso }
-  # 列表里混着推广位，newsnow 也是靠关键词剔的。
+  format: rss
+  # RSS 里同样混推广位，规则沿用列表页那套。
   exclude_if:
     title: [神券, 优惠, 补贴, 京东]
     url: [lapin]

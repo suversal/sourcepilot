@@ -1,0 +1,13 @@
+name: huggingface
+display_name: Hugging Face 博客
+type: vendor
+platform: huggingface
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://huggingface.co/blog/feed.xml
+
+extract:
+  format: rss

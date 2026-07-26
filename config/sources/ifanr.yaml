@@ -1,0 +1,13 @@
+name: ifanr
+display_name: 爱范儿
+type: rss
+platform: ifanr
+enabled: true
+min_interval: 14400
+lang: zh
+
+request:
+  url: https://www.ifanr.com/feed
+
+extract:
+  format: rss

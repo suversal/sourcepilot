@@ -1,19 +1,17 @@
+# 2026-07-26 改用官方 RSS。原先抓快讯列表页，实测对比：
+#   HTML 快讯页  55 条，**时间/摘要/作者全无**（列表只显示时分，取不到日期）
+#   官方 RSS     30 条，有完整发布时间，摘要 5000+ 字
+# 原先那 55 条 published_at 全是 null、summary 全是空——对下游几乎不可用。
 name: 36kr
-display_name: 36氪快讯
+display_name: 36氪
 type: hotlist
 platform: 36kr
 enabled: true
-min_interval: 300
+min_interval: 900
 lang: zh
-base_url: https://www.36kr.com
 
 request:
-  url: https://www.36kr.com/newsflashes
+  url: https://36kr.com/feed
 
 extract:
-  format: html
-  list: .newsflash-item
-  fields:
-    native_id: { select: "a.item-title", attr: href }
-    title: { select: "a.item-title" }
-    url: { select: "a.item-title", attr: href }
+  format: rss

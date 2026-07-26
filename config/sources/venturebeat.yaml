@@ -1,0 +1,13 @@
+name: venturebeat
+display_name: VentureBeat AI
+type: rss
+platform: venturebeat
+enabled: true
+min_interval: 10800
+lang: en
+
+request:
+  url: https://venturebeat.com/category/ai/feed
+
+extract:
+  format: rss

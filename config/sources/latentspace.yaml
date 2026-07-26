@@ -1,0 +1,13 @@
+name: latentspace
+display_name: Latent Space
+type: rss
+platform: latentspace
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://www.latent.space/feed
+
+extract:
+  format: rss

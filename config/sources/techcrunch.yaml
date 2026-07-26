@@ -1,0 +1,13 @@
+name: techcrunch
+display_name: TechCrunch AI
+type: rss
+platform: techcrunch
+enabled: true
+min_interval: 10800
+lang: en
+
+request:
+  url: https://techcrunch.com/category/artificial-intelligence/feed/
+
+extract:
+  format: rss

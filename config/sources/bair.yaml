@@ -1,0 +1,13 @@
+name: bair
+display_name: BAIR 伯克利 AI 研究
+type: rss
+platform: bair
+enabled: true
+min_interval: 43200
+lang: en
+
+request:
+  url: https://bair.berkeley.edu/blog/feed.xml
+
+extract:
+  format: rss

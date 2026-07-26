@@ -1,0 +1,13 @@
+name: aws-ml
+display_name: AWS 机器学习博客
+type: vendor
+platform: aws-ml
+enabled: true
+min_interval: 21600
+lang: en
+
+request:
+  url: https://aws.amazon.com/blogs/machine-learning/feed/
+
+extract:
+  format: rss
