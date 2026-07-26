@@ -426,6 +426,11 @@ REST 与 MCP 不可能对不上（有专门的一致性对照测试）。
 会在描述里明确标注「该源未提供发布时间，此处为本平台收录时间」，
 避免在阅读器里被误当成发布时间。
 
+条目形状：`<link>` 直接指向**第三方原文**（本平台不做展示层，没有站内阅读页），
+`<guid isPermaLink="false">` 用平台内部 id 保证判重稳定，`<description>` 是
+CDATA 包的 HTML（摘要 + 原文入口 + 来源署名），作者单独走 `<author>` 元素
+以便阅读器分组过滤。`<ttl>30</ttl>` 提示阅读器 30 分钟内不必重复拉取。
+
 ### 四、SKILL.md（给 Agent）
 
 把 [SKILL.md](SKILL.md) 放进 Codex / Claude Code 的 skill 目录，之后可以直接问

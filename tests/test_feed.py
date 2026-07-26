@@ -68,6 +68,35 @@ class TestRenderedXml:
         feed = self._parse([])
         assert feed.bozo is False and feed.entries == []
 
+    def test_title_is_escaped_not_cdata(self):
+        """CDATA 在 RSS 里意味着「这是 HTML」，而标题是纯文本。
+
+        包成 CDATA 的话，含 `<script>` 的第三方标题会被按 HTML 解析，
+        纯文本消费方拿到的是一串实体而不是原文。
+        """
+        xml = render_feed([make_item(title="A & B <script>")])
+        assert "<title>A &amp; B &lt;script&gt;</title>" in xml
+
+    def test_description_is_cdata_html(self):
+        """描述**是** HTML——阅读器要渲染它，纯文本会挤成一坨。"""
+        xml = render_feed([make_item()])
+        assert "<description><![CDATA[" in xml
+
+    def test_cdata_html_is_not_double_escaped(self):
+        """ET 会把整段当普通文本转义，不还原的话阅读器显示的是 `&lt;p&gt;` 字面量。"""
+        xml = render_feed([make_item()])
+        assert "<p>" in xml and "&lt;p&gt;" not in xml
+
+    def test_cdata_terminator_in_content_cannot_break_out(self):
+        """`]]>` 出现在第三方摘要里就能提前闭合 CDATA，让后面的内容变成裸 XML。"""
+        feed = self._parse([make_item(summary="危险 ]]><script>alert(1)</script>")])
+        assert feed.bozo is False
+        assert len(feed.entries) == 1
+
+    def test_ttl_tells_readers_not_to_hammer(self):
+        feed = self._parse([make_item()])
+        assert feed.feed.ttl == "30"
+
 
 class TestContentBoundary:
     """RSS 是公开阅读面，不代表第三方内容因此获得再分发许可。"""
@@ -86,6 +115,12 @@ class TestContentBoundary:
         """署名必须留——镜像或再分发时读者要知道内容来自哪。"""
         feed = feedparser.parse(render_feed([make_item()]))
         assert "测试源" in feed.entries[0].description
+
+    def test_original_link_also_appears_in_body(self):
+        """摘要为空的条目在阅读器里只剩标题，正文区得有个可点的原文入口。"""
+        feed = feedparser.parse(render_feed([make_item(summary=None)]))
+        assert "阅读原文" in feed.entries[0].description
+        assert "https://example.com/a" in feed.entries[0].description
 
     def test_discovered_time_is_disclosed_as_such(self):
         """time_basis=discovered 时不说明的话，阅读器里会被当成发布时间。"""
@@ -110,6 +145,16 @@ class TestOptionalFields:
         )
         feed = feedparser.parse(render_feed([item]))
         assert feed.entries[0].enclosures[0]["href"] == "https://example.com/a.jpg"
+
+    def test_author_is_its_own_element(self):
+        """塞进描述文字里的话，阅读器没法按作者分组或过滤。"""
+        feed = feedparser.parse(render_feed([make_item()]))
+        assert "作者甲" in feed.entries[0].author
+
+    def test_author_is_omitted_when_unknown(self):
+        """宁可没有，也不要伪造一个「未知作者」占位。"""
+        xml = render_feed([make_item(author=None)])
+        assert "<author>" not in xml
 
     def test_self_link_helps_readers_track_the_source(self):
         feed = feedparser.parse(
