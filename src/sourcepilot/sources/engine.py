@@ -97,6 +97,37 @@ def _classify_http_error(response: Any) -> SourcePilotError:
     return UpstreamDown(f"上游返回意外状态 {status}")
 
 
+def check_business_status(config: SourceConfig, payload: Any) -> None:
+    """检查响应体里的业务状态码。
+
+    HTTP 200 不等于成功——很多站点用体内的码表示拒绝。不看这个的话，
+    「被风控挡了一下」会一路走到提取层，表现为「取不到列表」，然后被报成
+    「多半是对方改版了」。那句话会把人带到完全错误的排查方向上。
+    """
+    spec = config.status
+    if spec is None or not isinstance(payload, dict):
+        return
+
+    code = resolve_path(payload, spec.path)
+    if code is None or code in spec.ok:
+        return
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        raise UpstreamDown(f"{config.name} 的业务状态码不是数字：{code!r}") from None
+
+    message = resolve_path(payload, spec.message_path) if spec.message_path else None
+    detail = f"{config.name} 业务码 {code}" + (f"：{message}" if message else "")
+
+    if code in spec.rate_limited:
+        raise RateLimited(detail)
+    if code in spec.auth_expired:
+        raise AuthExpired(detail)
+    if code in spec.captcha:
+        raise Captcha(detail)
+    raise UpstreamDown(detail)
+
+
 def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
     """执行（可选的 pre_request +）正式请求，返回解析后的 JSON。"""
     owns_client = client is None
@@ -135,9 +166,12 @@ def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
 
         if config.extract.format == "json":
             try:
-                return response.json()
+                payload = response.json()
             except ValueError as exc:
                 raise UpstreamDown(f"{config.name} 返回的不是合法 JSON") from exc
+            # HTTP 200 不代表业务上成功，先过一遍体内状态码。
+            check_business_status(config, payload)
+            return payload
         return response.text
     finally:
         if owns_client:

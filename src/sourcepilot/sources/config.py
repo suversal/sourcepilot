@@ -106,6 +106,28 @@ class PreRequestSpec(BaseModel):
     timeout: float = 10.0
 
 
+class StatusSpec(BaseModel):
+    """响应体里的业务状态码在哪、什么值算成功。
+
+    很多站点**永远回 HTTP 200**，真实结果藏在响应体里（B站的 `code`、
+    公众平台的 `base_resp.ret`）。不声明这个，引擎只能看 HTTP 状态，
+    于是「临时被风控挡了一下」会被误报成「对方改版了」——前者退避即可，
+    后者要人去改配置，两者的处理方式完全相反。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(description="状态码在响应体里的点分路径，如 code 或 base_resp.ret")
+    ok: list[int] = Field(default_factory=lambda: [0], description="哪些值算成功")
+    message_path: str | None = Field(
+        default=None, description="错误说明的路径，用于把上游的原话带进日志"
+    )
+    #: 状态码 → 错误类型。没列出的一律当 UPSTREAM_DOWN。
+    rate_limited: list[int] = Field(default_factory=list, description="判为限流的码")
+    auth_expired: list[int] = Field(default_factory=list, description="判为凭据失效的码")
+    captcha: list[int] = Field(default_factory=list, description="判为触发验证码的码")
+
+
 class ExtractSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -221,6 +243,10 @@ class SourceConfig(BaseModel):
             "推导规则是对站点的假设，开着它才能把假设失效变成可见的条目数下降，"
             "而不是悄悄产出一堆死链。"
         ),
+    )
+    status: StatusSpec | None = Field(
+        default=None,
+        description="响应体里的业务状态码。站点用 HTTP 200 + 体内错误码表示拒绝时必填",
     )
     pre_request: PreRequestSpec | None = None
     request: RequestSpec | None = None

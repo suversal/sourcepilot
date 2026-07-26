@@ -203,3 +203,90 @@ class TestCategorizer:
 
         c = Categorizer({"source_rules": {"arxiv": ["paper"]}})
         assert [x.value for x in c.classify(title="随便什么", source_keys=("arxiv",))] == ["paper"]
+
+
+class TestBusinessStatusCode:
+    """HTTP 200 不等于成功。
+
+    很多站点用体内的码表示拒绝（B站 `code`、公众平台 `base_resp.ret`）。
+    不看这个的话，「被风控挡了一下」会一路走到提取层、表现为「取不到列表」，
+    然后被报成「多半是对方改版了」——那句话会把人带到完全错误的排查方向上。
+    实测 B站就这样误报过一次。
+    """
+
+    def _config(self, **over):
+        base = {
+            **FAKE_CONFIG_DICT,
+            "status": {
+                "path": "code",
+                "ok": [0],
+                "message_path": "message",
+                "rate_limited": [-352],
+                "auth_expired": [-101],
+                "captcha": [-900],
+            },
+        }
+        return SourceConfig(**{**base, **over})
+
+    def _fetch(self, monkeypatch, payload):
+        import httpx
+
+        from sourcepilot.sources.engine import fetch_raw
+
+        monkeypatch.setattr(
+            httpx.Client,
+            "request",
+            lambda self, m, url, **kw: httpx.Response(
+                200, json=payload, request=httpx.Request("GET", url)
+            ),
+        )
+        return fetch_raw(self._config())
+
+    def test_success_code_passes_through(self, monkeypatch):
+        payload = {**FAKE_PAYLOAD, "code": 0}
+        assert self._fetch(monkeypatch, payload)["code"] == 0
+
+    def test_rate_limit_code_becomes_rate_limited(self, monkeypatch):
+        """限流该退避重试；报成「改版了」会让人白白去改配置。"""
+        from sourcepilot.contracts import RateLimited
+
+        with pytest.raises(RateLimited, match="-352"):
+            self._fetch(monkeypatch, {"code": -352, "message": "请求过于频繁"})
+
+    def test_auth_code_becomes_auth_expired(self, monkeypatch):
+        from sourcepilot.contracts import AuthExpired
+
+        with pytest.raises(AuthExpired):
+            self._fetch(monkeypatch, {"code": -101, "message": "账号未登录"})
+
+    def test_captcha_code_becomes_captcha(self, monkeypatch):
+        from sourcepilot.contracts import Captcha
+
+        with pytest.raises(Captcha):
+            self._fetch(monkeypatch, {"code": -900})
+
+    def test_unknown_code_falls_back_to_upstream_down(self, monkeypatch):
+        with pytest.raises(UpstreamDown, match="-1"):
+            self._fetch(monkeypatch, {"code": -1, "message": "未知错误"})
+
+    def test_upstream_message_is_carried_into_the_error(self, monkeypatch):
+        """把上游的原话带出来——排查时那句话往往比我们的猜测更有用。"""
+        from sourcepilot.contracts import RateLimited
+
+        with pytest.raises(RateLimited, match="请求过于频繁"):
+            self._fetch(monkeypatch, {"code": -352, "message": "请求过于频繁"})
+
+    def test_sources_without_status_spec_are_unaffected(self, monkeypatch):
+        """没声明 status 的源照常走，不该因为这个特性改变行为。"""
+        import httpx
+
+        from sourcepilot.sources.engine import fetch_raw
+
+        monkeypatch.setattr(
+            httpx.Client,
+            "request",
+            lambda self, m, url, **kw: httpx.Response(
+                200, json={**FAKE_PAYLOAD, "code": -352}, request=httpx.Request("GET", url)
+            ),
+        )
+        assert fetch_raw(SourceConfig(**FAKE_CONFIG_DICT))["code"] == -352

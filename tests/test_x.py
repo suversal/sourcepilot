@@ -460,3 +460,99 @@ class TestSignatureAgainstRealData:
         assert list(body[:48]) == self.VK
         assert body[-1] == 3
         assert 0 <= noise <= 255
+
+
+class TestSignerLifecycle:
+    """密钥必须能重取。
+
+    密钥是从 X 某一次前端构建的页面里算出来的，X 一发版就失效。只解析一次的话，
+    搜索会从某一刻起一直 404 且不重启就好不了——这类「今天好好的、明天突然全坏
+    且不自愈」的故障最难排查。
+    """
+
+    def _backend(self, monkeypatch, loads: list):
+        """loads 是每次 XTransactionSigner.load 的返回值（异常则抛出）。"""
+        from sourcepilot.channels.x import signature as sig
+
+        calls = {"n": 0}
+
+        def fake_load(cookie, ua=None, client=None):
+            calls["n"] += 1
+            result = loads[min(calls["n"] - 1, len(loads) - 1)]
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        monkeypatch.setattr(sig.XTransactionSigner, "load", staticmethod(fake_load))
+        backend = GraphQLBackend(
+            pool=AccountPool([Account(name="a", cookie="auth_token=x; ct0=c")])
+        )
+        return backend, calls
+
+    def test_key_is_cached_not_reparsed_every_call(self, monkeypatch):
+        """解析一次要拉页面加好几 MB 的 chunk，不能每次请求都来一遍。"""
+        signer = object()
+        backend, calls = self._backend(monkeypatch, [signer])
+        account = backend.pool.accounts[0]
+        assert backend._ensure_signer(account) is signer
+        assert backend._ensure_signer(account) is signer
+        assert calls["n"] == 1
+
+    def test_force_refresh_reparses(self, monkeypatch):
+        first, second = object(), object()
+        backend, calls = self._backend(monkeypatch, [first, second])
+        account = backend.pool.accounts[0]
+        assert backend._ensure_signer(account) is first
+        assert backend._ensure_signer(account, force=True) is second
+        assert calls["n"] == 2
+
+    def test_expired_key_is_reparsed_after_ttl(self, monkeypatch):
+        """靠 TTL 兜底：万一某种失效不表现为 404，也不会永远用着废密钥。"""
+        from sourcepilot.channels.x import graphql as gq
+
+        first, second = object(), object()
+        backend, calls = self._backend(monkeypatch, [first, second])
+        account = backend.pool.accounts[0]
+        assert backend._ensure_signer(account) is first
+        backend._signer_loaded_at -= gq.SIGNER_TTL + 1
+        assert backend._ensure_signer(account) is second
+
+    def test_failure_is_not_retried_immediately(self, monkeypatch):
+        """失败后立刻重试没意义——解析一次要拉好几 MB，失败也不是一秒内能好的。"""
+        backend, calls = self._backend(monkeypatch, [RuntimeError("解析失败")])
+        account = backend.pool.accounts[0]
+        assert backend._ensure_signer(account) is None
+        assert backend._ensure_signer(account) is None
+        assert calls["n"] == 1, "冷却期内不该反复重试"
+
+    def test_failure_is_retried_after_backoff(self, monkeypatch):
+        from sourcepilot.channels.x import graphql as gq
+
+        ok = object()
+        backend, calls = self._backend(monkeypatch, [RuntimeError("失败"), ok])
+        account = backend.pool.accounts[0]
+        assert backend._ensure_signer(account) is None
+        backend._signer_failed_at -= gq.SIGNER_RETRY_AFTER + 1
+        assert backend._ensure_signer(account) is ok
+
+    def test_injected_signer_is_left_alone(self, monkeypatch):
+        """外部注入的签名器由调用方管生命周期，我们不去动它。"""
+        injected = object()
+        backend = GraphQLBackend(
+            pool=AccountPool([Account(name="a", cookie="ct0=c")]),
+            transaction_signer=injected,
+        )
+        assert backend._ensure_signer(backend.pool.accounts[0], force=True) is injected
+
+    def test_404_triggers_one_refresh_then_gives_up(self, monkeypatch):
+        """404 先当成签名过期试一次重取；还不行就说明是 operation id 的问题。"""
+        signer = type("S", (), {"sign": lambda self, m, p: "sig"})()
+        backend, calls = self._backend(monkeypatch, [signer, signer])
+        monkeypatch.setattr(
+            httpx.Client,
+            "get",
+            lambda self, url, **kw: httpx.Response(404, request=httpx.Request("GET", url)),
+        )
+        with pytest.raises(UpstreamDown, match="已尝试重取签名"):
+            backend.search("test", 5)
+        assert calls["n"] == 2, "应该恰好重取一次，不该无限重试"

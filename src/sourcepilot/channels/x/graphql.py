@@ -25,6 +25,7 @@ xcancel 要 RSS 白名单，X 自己的 guest token 虽然还能激活，但旧�
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -51,6 +52,12 @@ from .config import (
 )
 
 log = logging.getLogger("sourcepilot.channels.x")
+
+#: 密钥缓存时长。X 发版没有固定节奏，所以既靠 404 触发重取（快），
+#: 也靠这个上限兜底（防止某些静默失效不表现为 404）。
+SIGNER_TTL = 30 * 60
+#: 解析失败后的重试间隔。解析一次要拉好几 MB，失败也不是一秒内能好的。
+SIGNER_RETRY_AFTER = 5 * 60
 
 
 class TransactionSigner(Protocol):
@@ -217,25 +224,50 @@ class GraphQLBackend:
         self.timeout = timeout
         self.impersonate = impersonate
         self.signer = transaction_signer
-        self._signer_tried = transaction_signer is not None
+        #: 外部注入的签名器由调用方负责生命周期，我们不去动它。
+        self._signer_is_managed = transaction_signer is None
+        self._signer_loaded_at = 0.0
+        self._signer_failed_at = 0.0
 
-    def _ensure_signer(self, account: Account):
-        """按需解析签名密钥。
+    def _ensure_signer(self, account: Account, *, force: bool = False):
+        """按需解析签名密钥，**并在过期或被拒后重取**。
 
-        只在真要用签名的 operation 上才做——解析要拉页面和若干 MB 的 chunk，
+        只在真要用签名的 operation 上才解析——那要拉页面和若干 MB 的 chunk，
         时间线那类不需要签名的请求不该为此付代价。
+
+        为什么必须能重取：密钥是从 X 某一次前端构建的页面里算出来的，
+        **X 一发版它就失效**。只解析一次的话，搜索会从某一刻起一直 404，
+        而且不重启进程就永远好不了——这种「今天好好的、明天突然全坏且不自愈」
+        的故障最难排查。
         """
-        if self._signer_tried:
+        if not self._signer_is_managed:
             return self.signer
-        self._signer_tried = True
+
+        now = time.time()
+        if not force and self.signer is not None and now - self._signer_loaded_at < SIGNER_TTL:
+            return self.signer
+        # 刚失败过就别连着重试——解析一次要拉好几 MB，失败通常也不是一秒内能好的。
+        if not force and self.signer is None and now - self._signer_failed_at < SIGNER_RETRY_AFTER:
+            return None
+
         try:
             from .signature import XTransactionSigner
 
             self.signer = XTransactionSigner.load(account.cookie, account.user_agent)
+            self._signer_loaded_at = now
+            log.info("X 签名密钥已%s", "重新解析" if force else "解析")
         except Exception as exc:
             log.warning("X 签名密钥解析失败：%s", exc)
             self.signer = None
+            self._signer_failed_at = now
         return self.signer
+
+    def refresh_signer(self, account: Account | None = None):
+        """强制重取密钥。模块文档承诺过这个方法，现在它真的存在了。"""
+        account = account or (self.pool.accounts[0] if self.pool.accounts else None)
+        if account is None:
+            return None
+        return self._ensure_signer(account, force=True)
 
     def available(self) -> bool:
         return bool(self.pool.accounts)
@@ -248,6 +280,7 @@ class GraphQLBackend:
         *,
         features: dict[str, bool] | None = None,
         field_toggles: dict[str, Any] | None = None,
+        _retried: bool = False,
     ) -> dict:
         import json
 
@@ -291,9 +324,22 @@ class GraphQLBackend:
         self.pool.classify(account, operation, response)
 
         if response.status_code == 404:
-            # twscrape 的经验：404 往往意味着 operation id 或签名过期，而不是内容不存在。
+            # 404 有两种可能：签名过期，或 operation id 过期。前者能自愈，先试它。
+            if operation in SIGNED_OPERATIONS and not _retried and self._signer_is_managed:
+                log.info("%s 返回 404，重取签名密钥后重试一次", operation)
+                self._ensure_signer(account, force=True)
+                if self.signer is not None:
+                    return self._request(
+                        account,
+                        operation,
+                        variables,
+                        features=features,
+                        field_toggles=field_toggles,
+                        _retried=True,
+                    )
+            # 重取过还是 404，那多半就是 operation id 过期了——那个只能靠人改配置。
             raise UpstreamDown(
-                f"{operation} 返回 404——operation id 多半过期了，"
+                f"{operation} 返回 404（已尝试重取签名）——operation id 多半过期了，"
                 f"更新 channels/x/config.py 里的 OPERATIONS"
             )
         if response.status_code != 200:

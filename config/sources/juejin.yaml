@@ -11,6 +11,11 @@ lang: zh
 request:
   url: https://api.juejin.cn/content_api/v1/content/article_rank?category_id=1&type=hot
 
+status:
+  path: err_no
+  ok: [0]
+  message_path: err_msg
+
 extract:
   format: json
   list: data

@@ -12,6 +12,16 @@ request:
   headers:
     Referer: https://www.bilibili.com/
 
+# B站永远回 HTTP 200，真实结果在体内的 code 里。不声明这个的话，被风控挡一下
+# 会一路走到提取层，表现为「取不到列表」，然后被误报成「多半是对方改版了」——
+# 那句话会把排查方向带偏（实测已经误报过一次）。
+status:
+  path: code
+  ok: [0]
+  message_path: message
+  rate_limited: [-352, -509, -799]   # 风控 / 请求过快
+  auth_expired: [-101, -111]         # 未登录 / csrf 失效
+
 extract:
   format: json
   list: data.list
