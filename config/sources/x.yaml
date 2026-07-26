@@ -1,4 +1,8 @@
-# X（Twitter）channel。默认禁用——先按需要决定要不要常驻采集。
+# X（Twitter）channel。已启用常驻采集，抓下面 accounts 列的账号时间线。
+#
+# 注意区分两条路：这里配的账号走定时采集，落库标 origin=collected，会进
+# 信息流与 RSS；而 search_x / get_x_timeline 的现查结果标 origin=searched，
+# 只作降级缓存——调用方随口给的 query 不该污染所有订阅者的内容。
 #
 # ── 三个后端，按能力分工（实测 2026-07-26）──────────────────
 #   fxtwitter  单推 / 用户资料   零认证 ✅ 已验证（能拿到互动数）

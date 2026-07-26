@@ -556,3 +556,53 @@ class TestSignerLifecycle:
         with pytest.raises(UpstreamDown, match="已尝试重取签名"):
             backend.search("test", 5)
         assert calls["n"] == 2, "应该恰好重取一次，不该无限重试"
+
+
+class TestSearchResultsDoNotPolluteTheFeed:
+    """现查结果落库是对的，但不能混进订阅内容。
+
+    真实事故：一次 `/x/search?q=Opus` 的实测把「Barbie is his magnum opus?」
+    和一条游泳比赛的推文写进了库，它们随即排到 `/items?source=x` 最前面——
+    也就是会推给每个 RSS 订阅者和 AIRADAR。
+    """
+
+    def _service(self, store, items):
+        from sourcepilot.x_service import XSearchService
+
+        class FakeRouter:
+            def search(self, q, limit, cursor=None):
+                return items, None
+
+        return XSearchService(store, router=FakeRouter())
+
+    def _tweet(self, n: int):
+        from sourcepilot.contracts import Item, Source
+
+        return Item(
+            id=f"x:{n}",
+            source=Source(type=SourceType.X, name="X / Twitter", platform="x"),
+            title=f"Barbie is his magnum opus? {n}",
+            url=f"https://x.com/someone/status/{n}",
+            author="someone",
+            published_at=NOW,
+            discovered_at=NOW,
+            time_basis=TimeBasis.PUBLISHED,
+            score=0.0,
+        )
+
+    def test_live_search_results_never_reach_the_feed(self, store):
+        from sourcepilot.contracts import GetFeedParams, SearchXParams
+        from sourcepilot.services import FeedService
+
+        env = self._service(store, [self._tweet(1)]).search(SearchXParams(q="Opus"))
+        assert len(env.data.items) == 1, "调用方仍然拿到现查结果"
+
+        feed = FeedService(store).get(GetFeedParams(window="all"))
+        assert feed.data.items == [], "但它们不该出现在信息流里"
+
+    def test_they_are_still_there_for_the_degradation_path(self, store):
+        """落库的意义就在这里——下次现查挂了要有东西可降级。"""
+        from sourcepilot.contracts import SearchXParams
+
+        self._service(store, [self._tweet(1)]).search(SearchXParams(q="Opus"))
+        assert len(store.query_items(limit=10, include_searched=True)) == 1

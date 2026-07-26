@@ -64,6 +64,8 @@ class XSearchService:
             published_after=(None if span is None else datetime.now(UTC) - timedelta(seconds=span)),
             limit=limit + 1,
             cursor=cursor,
+            # 降级链是现查缓存唯一该被读到的地方——它们本来就是为这一刻落的库。
+            include_searched=True,
         )
 
     def _cache_envelope(
@@ -107,8 +109,10 @@ class XSearchService:
             return self._cache_envelope(rows, params.limit, started, stale=True)
 
         # 现查到的结果顺手入库，下次现查失败时才有东西可降级。
+        # 标 searched：q 是调用方随口给的，搜「Opus」会捞回「magnum opus」这种
+        # 毫不相干的推文，不能让它们混进 /items 和 /feed.xml 推给所有下游。
         if items:
-            self.store.upsert_items(items)
+            self.store.upsert_items(items, origin="searched")
 
         meta = Meta(
             mode=Mode.LIVE,
@@ -140,6 +144,7 @@ class XTimelineService:
                 ),
                 limit=params.limit + 1,
                 cursor=params.cursor,
+                include_searched=True,
             )
 
         def envelope(rows, *, stale: bool, mode: Mode):
@@ -172,8 +177,9 @@ class XTimelineService:
             log.info("get_x_timeline 现查失败（%s），降级到缓存", exc.code.value)
             return envelope(rows, stale=True, mode=Mode.CACHE)
 
+        # 同上：handle 也是调用方给的，任意账号的时间线不等于我们的订阅内容。
         if items:
-            self.store.upsert_items(items)
+            self.store.upsert_items(items, origin="searched")
 
         return Envelope[ItemsPayload].success(
             ItemsPayload(items=items),

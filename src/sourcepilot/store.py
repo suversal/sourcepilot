@@ -46,7 +46,13 @@ CREATE TABLE IF NOT EXISTS items (
     categories    TEXT NOT NULL,
     lang          TEXT,
     media         TEXT NOT NULL,
-    raw           TEXT NOT NULL
+    raw           TEXT NOT NULL,
+    -- 这条是怎么进库的：`collected` = 平台自己订阅采集的，`searched` = 某次
+    -- 现查（search_x / get_x_timeline）顺手落下的缓存。
+    -- 两者必须分开：现查的 query 是调用方随口给的，搜「Opus」会捞回
+    -- 「magnum opus」这种毫不相干的推文，混进信息流就会推给所有 RSS 订阅者
+    -- 和 AIRADAR。落库仍然要做——降级链靠它兜底——但只在降级时才读。
+    origin        TEXT NOT NULL DEFAULT 'collected'
 );
 CREATE INDEX IF NOT EXISTS idx_items_discovered ON items(discovered_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_items_platform   ON items(platform, score DESC);
@@ -107,6 +113,12 @@ class Store:
             "UPDATE items SET effective_at = COALESCE(published_at, discovered_at) "
             "WHERE effective_at != COALESCE(published_at, discovered_at)"
         )
+        if "origin" not in existing:
+            # 老库一律回填 collected。这会把历史上那几条现查缓存也当成采集内容，
+            # 但反过来（默认 searched）会让整个库从信息流里消失，那个错法严重得多。
+            conn.execute(
+                "ALTER TABLE items ADD COLUMN origin TEXT NOT NULL DEFAULT 'collected'"
+            )
 
     @contextmanager
     def _conn(self):
@@ -120,7 +132,8 @@ class Store:
 
     # ---------- 条目 ----------
 
-    def upsert_items(self, items: Iterable[Item]) -> int:
+    def upsert_items(self, items: Iterable[Item], *, origin: str = "collected") -> int:
+        """落库。`origin` 区分订阅采集与现查缓存，见 items.origin 的列注释。"""
         rows = [
             (
                 item.id,
@@ -140,6 +153,7 @@ class Store:
                 item.lang,
                 json.dumps([m.model_dump(mode="json") for m in item.media]),
                 json.dumps(item.raw, ensure_ascii=False, default=str),
+                origin,
             )
             for item in items
         ]
@@ -149,7 +163,7 @@ class Store:
             # discovered_at 保持首次收录时间不变——增量拉取（since）依赖它稳定。
             conn.executemany(
                 """
-                INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title, summary=excluded.summary, url=excluded.url,
                     author=excluded.author, published_at=excluded.published_at,
@@ -159,7 +173,12 @@ class Store:
                     -- 永远落在时间窗内，翻页时还会因为排序键中途变化而漏条重条。
                     effective_at=COALESCE(excluded.published_at, items.discovered_at),
                     time_basis=excluded.time_basis, score=excluded.score,
-                    categories=excluded.categories, media=excluded.media, raw=excluded.raw
+                    categories=excluded.categories, media=excluded.media, raw=excluded.raw,
+                    -- origin 只能单向升级。一条推文先被某次搜索捞到、后来定时采集
+                    -- 也抓到了，它就确实属于订阅内容；反过来，已经在采集范围内的
+                    -- 条目不该因为有人搜到它而被降级出信息流。
+                    origin=CASE WHEN excluded.origin = 'collected'
+                                THEN 'collected' ELSE items.origin END
                 """,
                 rows,
             )
@@ -177,9 +196,15 @@ class Store:
         limit: int = 50,
         cursor: str | None = None,
         order_by_score: bool = False,
+        include_searched: bool = False,
     ) -> list[Item]:
         where: list[str] = []
         args: list[Any] = []
+
+        if not include_searched:
+            # 默认只给订阅采集的内容。现查缓存是调用方随口给的 query 捞回来的，
+            # 混进信息流就会推给所有下游——只有 X 的降级链该看见它们。
+            where.append("origin = 'collected'")
 
         if platforms:
             where.append(f"platform IN ({','.join('?' * len(platforms))})")

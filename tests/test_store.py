@@ -15,7 +15,7 @@ from sourcepilot.contracts import (
     SourceType,
     TimeBasis,
 )
-from sourcepilot.store import decode_cursor, encode_cursor
+from sourcepilot.store import Store, decode_cursor, encode_cursor
 
 NOW = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
 
@@ -159,3 +159,50 @@ class TestEffectiveAtStability:
         store.upsert_items([it])
         assert store.query_items(published_after=NOW - timedelta(hours=1), limit=10) == []
         assert store.query_items(published_after=NOW - timedelta(days=7), limit=10) != []
+
+
+class TestOriginSeparatesSubscribedFromSearched:
+    """现查缓存与订阅采集必须分开。
+
+    `search_x` 的 q 是调用方随口给的——搜「Opus」会捞回「magnum opus」这种
+    毫不相干的推文。落库是对的（降级链靠它兜底），但混进信息流就等于让
+    任何人的一次临时查询污染所有 RSS 订阅者和 AIRADAR 的内容。
+    """
+
+    def test_searched_items_stay_out_of_the_feed(self, store):
+        store.upsert_items([item(1)], origin="searched")
+        assert store.query_items(limit=10) == []
+
+    def test_degradation_path_can_still_read_them(self, store):
+        """它们本来就是为现查失败那一刻落的库，降级时必须看得见。"""
+        store.upsert_items([item(1)], origin="searched")
+        assert len(store.query_items(limit=10, include_searched=True)) == 1
+
+    def test_collected_is_the_default(self, store):
+        """定时采集不传 origin，落下来就该是订阅内容。"""
+        store.upsert_items([item(1)])
+        assert len(store.query_items(limit=10)) == 1
+
+    def test_search_cannot_demote_collected_items(self, store):
+        """已在采集范围内的条目，不该因为有人搜到它而被踢出信息流。"""
+        store.upsert_items([item(1)])
+        store.upsert_items([item(1)], origin="searched")
+        assert len(store.query_items(limit=10)) == 1
+
+    def test_collection_promotes_a_previously_searched_item(self, store):
+        """反过来要升级：定时采集也抓到了，说明它确实属于订阅内容。"""
+        store.upsert_items([item(1)], origin="searched")
+        assert store.query_items(limit=10) == []
+        store.upsert_items([item(1)])
+        assert len(store.query_items(limit=10)) == 1
+
+    def test_old_db_backfills_to_collected(self, tmp_path):
+        """老库没有这一列。默认 searched 会让整个库从信息流里消失。"""
+        import sqlite3
+
+        path = tmp_path / "legacy.db"
+        store = Store(path)
+        store.upsert_items([item(1)])
+        with sqlite3.connect(path) as conn:
+            conn.execute("ALTER TABLE items DROP COLUMN origin")
+        assert len(Store(path).query_items(limit=10)) == 1
