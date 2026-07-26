@@ -84,6 +84,9 @@ REST 与 MCP 完全一致：
 | `INTERNAL` | 500 | 平台自身故障 |
 
 MCP 侧没有 HTTP 状态码，只看信封的 `ok` 与 `error.code`，语义完全一致。
+出口实现见 `src/sourcepilot/mcp_server.py`——它由 `TOOL_REGISTRY` 驱动，
+tool schema 直接从本契约的 params 模型生成，所以 REST 与 MCP 的参数定义
+**不可能对不上**（只有一份）。
 
 ---
 

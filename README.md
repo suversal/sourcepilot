@@ -17,6 +17,25 @@
 
 三个出口共用同一批工具定义（`src/sourcepilot/contracts/`），只是协议壳不同。
 
+```bash
+.venv/bin/python -m uvicorn sourcepilot.api:app --app-dir src --port 8420   # REST
+.venv/bin/python -m sourcepilot.mcp_server                                   # MCP（stdio）
+```
+
+接进 Claude Desktop 之类的客户端，在它的 MCP 配置里加：
+
+```json
+{
+  "mcpServers": {
+    "sourcepilot": {
+      "command": "/绝对路径/.venv/bin/python",
+      "args": ["-m", "sourcepilot.mcp_server"],
+      "env": { "PYTHONPATH": "/绝对路径/src" }
+    }
+  }
+}
+```
+
 ## 状态
 
 契约 v1.1.0，采集链路端到端跑通（22 源 / 3 端点，含后台定时采集），X 后端未开始。

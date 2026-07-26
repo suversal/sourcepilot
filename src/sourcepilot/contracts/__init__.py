@@ -39,6 +39,7 @@ from .tools import (
     GetXTimelineParams,
     ReadArticleParams,
     SearchXParams,
+    ToolSpec,
     Window,
 )
 from .version import API_PREFIX, CONTRACT_VERSION
@@ -72,6 +73,7 @@ __all__ = [
     "RateLimited",
     "ReadArticleParams",
     "SearchXParams",
+    "ToolSpec",
     "Source",
     "SourceHealth",
     "SourcePilotError",

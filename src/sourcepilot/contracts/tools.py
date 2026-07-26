@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
@@ -114,12 +115,60 @@ class GetFeedParams(Paginated):
         return None if v is None else to_utc(v)
 
 
-#: 工具名 → (入参模型, REST 端点)。三出口从这里派生，别各写各的。
-TOOL_REGISTRY: dict[str, tuple[type[_Params], str]] = {
-    "search_x": (SearchXParams, "/x/search"),
-    "get_x_timeline": (GetXTimelineParams, "/x/timeline"),
-    "get_hotlist": (GetHotlistParams, "/hotlist"),
-    "get_wechat_feed": (GetWechatFeedParams, "/wechat/feed"),
-    "read_article": (ReadArticleParams, "/article"),
-    "get_feed": (GetFeedParams, "/items"),
+@dataclass(frozen=True)
+class ToolSpec:
+    """一个工具的协议无关定义。三出口都从这里派生，别各写各的。
+
+    `description` 是给 **MCP 客户端选工具**用的——REST 那边人看 docstring 和
+    OpenAPI，MCP 那边是模型读这段文字来决定调不调。所以它得说清楚
+    「什么时候用它」和「它给不了什么」，而不只是复述参数。
+    """
+
+    params: type[_Params]
+    rest_path: str
+    description: str
+
+
+TOOL_REGISTRY: dict[str, ToolSpec] = {
+    "search_x": ToolSpec(
+        SearchXParams,
+        "/x/search",
+        "现场搜索 X（Twitter）上的任意关键词。**这是唯一的实时查询工具**，"
+        "其余都是读预采集的缓存。用于「X 上现在怎么评价某个东西」这类问题。"
+        "较慢（数秒），且现查失败时会降级到缓存并把 meta.stale 置 true——"
+        "那种情况必须向用户说明结果非实时。",
+    ),
+    "get_x_timeline": ToolSpec(
+        GetXTimelineParams,
+        "/x/timeline",
+        "取某个 X 账号最近发的推文。适合「某某最近发了什么」。"
+        "走公开镜像，拿不到互动数，score 恒为 0——别据此判断哪条更热门。",
+    ),
+    "get_hotlist": ToolSpec(
+        GetHotlistParams,
+        "/hotlist",
+        "多平台科技热榜（B站、头条、掘金、Hacker News、GitHub Trending 等）。"
+        "回答「现在大家在讨论什么」。这是二手讨论，不是官方发布；"
+        "想要厂商一手信息用 get_feed 配 source=vendor。",
+    ),
+    "get_wechat_feed": ToolSpec(
+        GetWechatFeedParams,
+        "/wechat/feed",
+        "已订阅公众号的最新文章。**只覆盖已订阅的号**，不是全网搜索——"
+        "用户问一个没订阅的号，如实说没订阅，别拿别家文章顶替。",
+    ),
+    "read_article": ToolSpec(
+        ReadArticleParams,
+        "/article",
+        "抓取指定 URL 的正文并转成 Markdown。用于「展开讲讲这条」——"
+        "先从别的工具拿到条目的 url，再传进来。只接受公网 http(s) 地址。",
+    ),
+    "get_feed": ToolSpec(
+        GetFeedParams,
+        "/items",
+        "归一化的资讯流，覆盖全部信源。支持关键词检索（q，中文按字符匹配）、"
+        "按信源过滤（platform）、按类型过滤（source=vendor 取 OpenAI/Anthropic "
+        "等厂商官方发布）、时间窗（window）。这是最通用的入口，"
+        "不确定用哪个工具时先用它。",
+    ),
 }

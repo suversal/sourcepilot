@@ -25,8 +25,8 @@
 | 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.1.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
 | 2 | REST + SKILL.md + 首个信源 | ⚠️ 基本完成 | 声明式引擎（JSON/HTML/RSS）、22 个信源、3 个端点、后台调度器、[SKILL.md](../SKILL.md) | 127 项离线测试 + 真实 uvicorn curl 验证 |
 | 3 | X 后端（签名/账号池/限流） | ✅ 完成 | 三后端路由、账号池 + 限流状态机、`x-client-transaction-id` 签名、`search_x` 现查降级链、两个 REST 端点 | 39 项离线测试 + **现场搜 X 真实跑通**（10 条实时结果 6.1s，带游标）；调度器已自动采集 |
-| 4 | 可靠性层（Canary/故障转移/代理） | 🔶 Canary 完成 | `canary.py` 三级健康判定 + `/health` 暴露 | 13 项测试 + 真实注入故障验证（能报出连续失败与落后，整体 ok 正确翻转）。代理轮换未做 |
-| 5 | MCP 出口 | ⬜ 未开始 | — | — |
+| 4 | 可靠性层（Canary/故障转移/代理） | 🔶 Canary 完成，代理未做（T2） | `canary.py` 三级健康判定 + `/health` 暴露 | 13 项测试 + 真实注入故障验证（能报出连续失败与落后，整体 ok 正确翻转）。代理轮换未做 |
+| 5 | MCP 出口 | ✅ 完成 | `mcp_server.py`（与 api.py 平级，零业务逻辑）、`ToolSpec` 协议无关的工具定义 | 11 项测试（含 3 项 REST/MCP 一致性对照）+ 真实 stdio 客户端跑通六个工具 |
 | 6 | 迁 RSS + 公众号 channel | ✅ 完成 | RSS 提取器、公众号 channel（mp 后端 + 冷却状态机）、`/api/v1/wechat/feed` | 27 项离线测试 + **真实凭据端到端跑通**：量子位/机器之心共 34 条入库 |
 
 第 2 步的 SKILL.md 已按其内容逐条走查过（见变更节点），修掉端口写错、公众号缺路由、
