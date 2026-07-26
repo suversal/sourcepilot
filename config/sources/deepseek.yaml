@@ -5,7 +5,7 @@ display_name: DeepSeek 发布公告
 type: vendor
 platform: deepseek
 enabled: true
-min_interval: 1800
+min_interval: 3600  # 更新日志页，变更更慢
 lang: en
 base_url: https://api-docs.deepseek.com
 categories: [model]

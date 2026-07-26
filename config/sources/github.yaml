@@ -4,7 +4,7 @@ type: hotlist
 platform: github
 enabled: true
 ranked: true
-min_interval: 1800
+min_interval: 3600  # Trending 按天更新，半小时抓一次没有意义
 lang: en
 base_url: https://github.com
 

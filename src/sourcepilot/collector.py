@@ -17,6 +17,7 @@ import httpx
 
 from .contracts import Item, SourceHealth, SourcePilotError, SourceType
 from .sources import SourceConfig, collect
+from .sources.engine import NotModified
 from .store import Store
 
 log = logging.getLogger("sourcepilot.collector")
@@ -31,6 +32,8 @@ class Outcome:
     fetched: bool = False
     collected_at: datetime | None = None
     items: list[Item] = field(default_factory=list)
+    #: 对方回了 304——这一轮不用干活，库里的旧数据依然有效。
+    unchanged: bool = False
 
     @property
     def degraded(self) -> bool:
@@ -72,11 +75,24 @@ class Collector:
         self, config: SourceConfig, now: datetime, client: httpx.Client | None = None
     ) -> Outcome:
         """抓一个源并落库。抓失败不抛——错误装进 Outcome，交给上层决定怎么降级。"""
+        validators_out: dict[str, str | None] = {}
         try:
-            items = collect(config, client)
+            items = collect(
+                config, client, self.store.get_validators(config.name), validators_out
+            )
             self.store.upsert_items(items)
             self.store.record_success(config.name, len(items), now)
+            if validators_out:
+                self.store.save_validators(
+                    config.name, validators_out.get("etag"), validators_out.get("last_modified")
+                )
             return Outcome(config.name, fetched=True, collected_at=now, items=items)
+        except NotModified:
+            # 记成成功，但**不覆盖 last_item_count**——那是「上次真抓到多少条」，
+            # 写 0 会让 /health 看起来像这个源突然没数据了。
+            self.store.touch_success(config.name, now)
+            log.debug("源 %s 内容未变（304），跳过解析与入库", config.name)
+            return Outcome(config.name, collected_at=now, unchanged=True)
         except SourcePilotError as exc:
             self.store.record_failure(config.name, exc.code, now)
             log.warning("源 %s 采集失败：%s %s", config.name, exc.code.value, exc.message)

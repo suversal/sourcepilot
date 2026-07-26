@@ -6,7 +6,7 @@ display_name: 智谱 GLM 新品发布
 type: vendor
 platform: zhipu
 enabled: true
-min_interval: 1800
+min_interval: 3600  # 更新日志页
 lang: zh
 
 request:

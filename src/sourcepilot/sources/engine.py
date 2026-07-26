@@ -43,6 +43,15 @@ TRACKING_PARAMS = frozenset(
 )
 
 
+class NotModified(Exception):
+    """对方内容自上次采集以来没有变化（HTTP 304）。
+
+    **既不是错误，也不是「抓到 0 条」**——两种都会误导：记成错误会让
+    Canary 报警，记成 0 条会让 `/health` 显示这个源突然没数据了。
+    它的正确含义是「这一轮不用干活」，库里的旧数据依然有效。
+    """
+
+
 def normalize_url(url: str) -> str:
     parts = urlsplit(url)
     if not parts.query:
@@ -56,7 +65,7 @@ def normalize_url(url: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(kept)))
 
 
-def _fetch_impersonated(config: SourceConfig) -> Any:
+def _fetch_impersonated(config: SourceConfig, headers: dict[str, str] | None = None) -> Any:
     """走 curl_cffi，在 TLS 层伪装成真实浏览器。
 
     对付 Cloudflare 那种「Just a moment...」挑战——它拦的是 TLS 握手指纹，
@@ -68,7 +77,7 @@ def _fetch_impersonated(config: SourceConfig) -> Any:
         return curl_requests.request(
             config.request.method,
             config.request.url,
-            headers=config.request.merged_headers(),
+            headers=headers if headers is not None else config.request.merged_headers(),
             json=config.request.json_body,
             timeout=config.request.timeout,
             impersonate=config.request.impersonate,
@@ -128,8 +137,19 @@ def check_business_status(config: SourceConfig, payload: Any) -> None:
     raise UpstreamDown(detail)
 
 
-def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
-    """执行（可选的 pre_request +）正式请求，返回解析后的 JSON。"""
+def fetch_raw(
+    config: SourceConfig,
+    client: httpx.Client | None = None,
+    validators: tuple[str | None, str | None] = (None, None),
+    validators_out: dict[str, str | None] | None = None,
+) -> Any:
+    """执行（可选的 pre_request +）正式请求，返回解析后的 JSON。
+
+    `validators` 是上次响应的 (ETag, Last-Modified)。带上它们，对方内容没变时
+    会回 304 空响应——省掉的不只是解析，是整个正文的传输。
+    本次响应的校验器写进 `validators_out`（用出参而不是改返回类型，是为了不动
+    所有既有调用方——测试里大量 monkeypatch 它直接返回裸 payload）。
+    """
     owns_client = client is None
     client = client or httpx.Client(follow_redirects=True)
     try:
@@ -145,14 +165,21 @@ def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
             except httpx.HTTPError:
                 pass
 
+        headers = config.request.merged_headers()
+        etag, last_modified = validators
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+
         if config.request.impersonate:
-            response = _fetch_impersonated(config)
+            response = _fetch_impersonated(config, headers)
         else:
             try:
                 response = client.request(
                     config.request.method,
                     config.request.url,
-                    headers=config.request.merged_headers(),
+                    headers=headers,
                     json=config.request.json_body,
                     timeout=config.request.timeout,
                 )
@@ -161,8 +188,14 @@ def fetch_raw(config: SourceConfig, client: httpx.Client | None = None) -> Any:
             except httpx.HTTPError as exc:
                 raise UpstreamDown(f"{config.name} 连接失败：{type(exc).__name__}") from exc
 
+        if response.status_code == 304:
+            raise NotModified(config.name)
         if response.status_code != 200:
             raise _classify_http_error(response)
+
+        if validators_out is not None:
+            validators_out["etag"] = response.headers.get("etag")
+            validators_out["last_modified"] = response.headers.get("last-modified")
 
         if config.extract.format == "json":
             try:
@@ -260,6 +293,9 @@ def normalize(config: SourceConfig, payload: Any, *, now: datetime | None = None
     """把原始响应转成统一 Item。单条坏了就跳过，不拖垮整源。"""
     now = now or datetime.now(UTC)
     rows, field_specs = _rows_and_fields(config, payload)
+    if config.max_items is not None:
+        # 在解析之前截断，省的正是逐条建 Item 的开销。
+        rows = rows[: config.max_items]
     is_html = config.extract.format == "html"
 
     source = Source(type=config.type, name=config.display_name, platform=config.platform)
@@ -385,14 +421,19 @@ def register_channel(name: str, collector) -> None:
     CHANNELS[name] = collector
 
 
-def collect(config: SourceConfig, client: httpx.Client | None = None) -> list[Item]:
+def collect(
+    config: SourceConfig,
+    client: httpx.Client | None = None,
+    validators: tuple[str | None, str | None] = (None, None),
+    validators_out: dict[str, str | None] | None = None,
+) -> list[Item]:
     if config.channel is not None:
         handler = CHANNELS.get(config.channel)
         if handler is None:
             raise UpstreamDown(f"未注册的 channel：{config.channel}")
         return handler(config)
 
-    items = normalize(config, fetch_raw(config, client))
+    items = normalize(config, fetch_raw(config, client, validators, validators_out))
     if config.verify_urls:
         items = verify_urls(config, items, client)
     return items

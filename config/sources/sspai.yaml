@@ -4,7 +4,7 @@ type: hotlist
 platform: sspai
 enabled: true
 ranked: true
-min_interval: 900
+min_interval: 1800  # 实测 10 条/天
 lang: zh
 
 request:

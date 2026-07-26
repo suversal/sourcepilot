@@ -39,7 +39,7 @@ def broken() -> set[str]:
 def calls(monkeypatch, broken) -> list[str]:
     seen: list[str] = []
 
-    def fake_fetch(config, client=None):
+    def fake_fetch(config, client=None, *a, **kw):
         seen.append(config.name)
         if config.name in broken:
             raise UpstreamDown(f"{config.name} 挂了")
@@ -199,7 +199,7 @@ class TestVerifyUrls:
 
         from sourcepilot.sources import engine as eng
 
-        monkeypatch.setattr(eng, "fetch_raw", lambda config, client=None: self.PAGE)
+        monkeypatch.setattr(eng, "fetch_raw", lambda config, client=None, *a, **kw: self.PAGE)
 
         def fake_head(self_client, url, **kw):
             code = 404 if "dead-post" in url else 200
@@ -218,3 +218,119 @@ class TestVerifyUrls:
 
         items = collect(SourceConfig(**{**self.CONFIG, "verify_urls": False}))
         assert len(items) == 2, "没开校验就不该多发请求，也不该丢条目"
+
+
+class TestMaxItemsCapsTheWork:
+    """源给多少不由我们定，但解析和入库多少由我们定。
+
+    OpenAI 的 RSS 一次吐 1050 篇十年历史，每 15 分钟重解析一遍全量，
+    而其中的新内容通常是 0 条。
+    """
+
+    CONFIG = {
+        "name": "manysrc",
+        "display_name": "条目很多的源",
+        "platform": "manysrc",
+        "request": {"url": "https://example.com/feed"},
+        "extract": {
+            "format": "json",
+            "list": "rows",
+            "fields": {"native_id": "id", "title": "title", "url": "link"},
+        },
+    }
+
+    def _payload(self, n: int):
+        return {
+            "rows": [
+                {"id": str(i), "title": f"第 {i} 条", "link": f"https://example.com/{i}"}
+                for i in range(n)
+            ]
+        }
+
+    def test_truncates_to_the_cap(self, monkeypatch):
+        from sourcepilot.sources import SourceConfig, engine
+
+        config = SourceConfig(**{**self.CONFIG, "max_items": 10})
+        assert len(engine.normalize(config, self._payload(500))) == 10
+
+    def test_keeps_the_head_not_a_random_slice(self, monkeypatch):
+        """源给的顺序有意义——RSS 按时间倒序、榜单按名次，要的是最前面那些。"""
+        from sourcepilot.sources import SourceConfig, engine
+
+        config = SourceConfig(**{**self.CONFIG, "max_items": 3})
+        items = engine.normalize(config, self._payload(50))
+        assert [i.title for i in items] == ["第 0 条", "第 1 条", "第 2 条"]
+
+    def test_none_means_unlimited(self):
+        """接一个新源时要能一次收全历史，所以得留得掉这个盖子的口子。"""
+        from sourcepilot.sources import SourceConfig, engine
+
+        config = SourceConfig(**{**self.CONFIG, "max_items": None})
+        assert len(engine.normalize(config, self._payload(500))) == 500
+
+    def test_a_short_source_is_untouched(self):
+        from sourcepilot.sources import SourceConfig, engine
+
+        config = SourceConfig(**{**self.CONFIG, "max_items": 100})
+        assert len(engine.normalize(config, self._payload(20))) == 20
+
+
+class TestConditionalRequests:
+    """304 既不是错误，也不是「抓到 0 条」——两种记法都会误导 /health。"""
+
+    def _config(self):
+        from sourcepilot.sources import SourceConfig
+
+        return SourceConfig(
+            name="condsrc",
+            display_name="支持条件请求的源",
+            platform="condsrc",
+            request={"url": "https://example.com/feed"},
+            extract={
+                "format": "json",
+                "list": "rows",
+                "fields": {"native_id": "id", "title": "title", "url": "link"},
+            },
+        )
+
+    def test_not_modified_is_not_a_failure(self, store, monkeypatch):
+        from sourcepilot.collector import Collector
+        from sourcepilot.sources import engine
+
+        config = self._config()
+        store.record_success("condsrc", 42, NOW)
+
+        def raise_304(*a, **kw):
+            raise engine.NotModified("condsrc")
+
+        monkeypatch.setattr(engine, "fetch_raw", raise_304)
+        outcome = Collector(store, {"condsrc": config}).refresh(config, NOW)
+
+        assert outcome.error is None, "304 不是错误"
+        assert outcome.unchanged is True
+        assert store.get_state("condsrc")["consecutive_failures"] == 0
+
+    def test_item_count_survives_a_304(self, store, monkeypatch):
+        """写 0 会让 /health 看起来像这个源突然没数据了。"""
+        from sourcepilot.collector import Collector
+        from sourcepilot.sources import engine
+
+        config = self._config()
+        store.record_success("condsrc", 42, NOW)
+        monkeypatch.setattr(
+            engine, "fetch_raw", lambda *a, **kw: (_ for _ in ()).throw(engine.NotModified("x"))
+        )
+        Collector(store, {"condsrc": config}).refresh(config, NOW)
+        assert store.get_state("condsrc")["last_item_count"] == 42
+
+    def test_validators_round_trip(self, store):
+        store.record_success("condsrc", 1, NOW)
+        store.save_validators("condsrc", '"abc123"', "Wed, 21 Oct 2026 07:28:00 GMT")
+        assert store.get_validators("condsrc") == (
+            '"abc123"',
+            "Wed, 21 Oct 2026 07:28:00 GMT",
+        )
+
+    def test_unknown_source_has_no_validators(self, store):
+        """首次采集当然没有校验器，不能因此炸掉。"""
+        assert store.get_validators("从没见过") == (None, None)

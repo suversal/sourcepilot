@@ -171,7 +171,7 @@ class TestEndpoint:
 
     @pytest.fixture(autouse=True)
     def _stub(self, monkeypatch):
-        monkeypatch.setattr(engine, "fetch_raw", lambda config, client=None: FAKE_PAYLOAD)
+        monkeypatch.setattr(engine, "fetch_raw", lambda config, client=None, *a, **kw: FAKE_PAYLOAD)
 
     def test_content_type_is_rss(self, client):
         r = client.get("/api/v1/feed.xml")

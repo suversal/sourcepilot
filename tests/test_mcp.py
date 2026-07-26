@@ -26,7 +26,7 @@ def sources():
 
 @pytest.fixture(autouse=True)
 def stub_fetch(monkeypatch):
-    monkeypatch.setattr(engine, "fetch_raw", lambda config, client=None: FAKE_PAYLOAD)
+    monkeypatch.setattr(engine, "fetch_raw", lambda config, client=None, *a, **kw: FAKE_PAYLOAD)
 
 
 class TestToolSchemas:

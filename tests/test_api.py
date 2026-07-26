@@ -32,7 +32,7 @@ def calls(monkeypatch) -> list[str]:
     """记录每次真实抓取，用来验证缓存有没有生效。"""
     seen: list[str] = []
 
-    def fake_fetch(config, client=None):
+    def fake_fetch(config, client=None, *a, **kw):
         seen.append(config.name)
         if config.name in BROKEN:
             raise UpstreamDown(f"{config.name} 挂了")

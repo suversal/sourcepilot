@@ -6,7 +6,7 @@ display_name: Anthropic 官方新闻
 type: vendor
 platform: anthropic
 enabled: true
-min_interval: 900
+min_interval: 3600  # 同上
 lang: en
 base_url: https://www.anthropic.com
 

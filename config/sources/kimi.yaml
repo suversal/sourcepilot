@@ -5,7 +5,7 @@ display_name: Kimi（月之暗面）研究博客
 type: vendor
 platform: kimi
 enabled: true
-min_interval: 1800
+min_interval: 3600  # 厂商博客
 lang: en
 categories: [model]
 

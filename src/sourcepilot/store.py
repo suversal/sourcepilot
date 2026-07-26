@@ -70,7 +70,11 @@ CREATE TABLE IF NOT EXISTS source_state (
     last_success_at      TEXT,
     last_error_code      TEXT,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    last_item_count      INTEGER NOT NULL DEFAULT 0
+    last_item_count      INTEGER NOT NULL DEFAULT 0,
+    -- HTTP 条件请求的校验器。带上它们再请求，对方内容没变就回 304 空响应，
+    -- 一个字节的正文都不用传，解析与入库也整个跳过。
+    etag                 TEXT,
+    last_modified        TEXT
 );
 """
 
@@ -113,6 +117,10 @@ class Store:
             "UPDATE items SET effective_at = COALESCE(published_at, discovered_at) "
             "WHERE effective_at != COALESCE(published_at, discovered_at)"
         )
+        state_cols = {r["name"] for r in conn.execute("PRAGMA table_info(source_state)")}
+        for col in ("etag", "last_modified"):
+            if col not in state_cols:
+                conn.execute(f"ALTER TABLE source_state ADD COLUMN {col} TEXT")
         if "origin" not in existing:
             # 老库一律回填 collected。这会把历史上那几条现查缓存也当成采集内容，
             # 但反过来（默认 searched）会让整个库从信息流里消失，那个错法严重得多。
@@ -301,6 +309,38 @@ class Store:
                 """,
                 (name, _iso(at), _iso(at), item_count),
             )
+
+    def touch_success(self, name: str, at: datetime) -> None:
+        """记一次「成功但内容没变」（HTTP 304）。
+
+        刻意不动 `last_item_count`——它的含义是「上次真抓到多少条」，
+        304 那轮写 0 会让 /health 和 Canary 以为这个源突然没数据了。
+        """
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE source_state
+                SET last_attempt_at=?, last_success_at=?,
+                    last_error_code=NULL, consecutive_failures=0
+                WHERE name=?
+                """,
+                (_iso(at), _iso(at), name),
+            )
+
+    def save_validators(self, name: str, etag: str | None, last_modified: str | None) -> None:
+        """记下本次响应的 ETag / Last-Modified，下次带着去问「变了吗」。"""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE source_state SET etag=?, last_modified=? WHERE name=?",
+                (etag, last_modified, name),
+            )
+
+    def get_validators(self, name: str) -> tuple[str | None, str | None]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT etag, last_modified FROM source_state WHERE name=?", (name,)
+            ).fetchone()
+        return (row["etag"], row["last_modified"]) if row else (None, None)
 
     def record_failure(self, name: str, code: ErrorCode, at: datetime) -> None:
         with self._conn() as conn:

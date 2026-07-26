@@ -188,6 +188,17 @@ class SourceConfig(BaseModel):
     min_interval: int = Field(
         default=300, ge=120, description="自适应抓取间隔下限（秒），最短 2 分钟"
     )
+    max_items: int | None = Field(
+        default=100,
+        ge=1,
+        description=(
+            "单次采集最多取列表前多少条，None = 不限。默认 100。"
+            "源给的顺序天然有意义——RSS 按时间倒序、榜单按名次——所以「取前 N 条」"
+            "就是「取最新/最靠前的 N 条」。它挡的是 OpenAI 那种一次吐 1050 篇十年"
+            "历史的 RSS：每 15 分钟重解析一遍全量，而其中新内容通常是 0 条。"
+            "注意这只省解析与入库，不省下载——RSS 是整个文件，要省流量得靠条件请求。"
+        ),
+    )
     lang: str | None = None
     base_url: str = Field(
         default="", description="站点根地址；模板里用 {base_url} 把相对链接拼成绝对链接"

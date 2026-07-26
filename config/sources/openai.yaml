@@ -3,7 +3,7 @@ display_name: OpenAI 官方新闻
 type: vendor
 platform: openai
 enabled: true
-min_interval: 900
+min_interval: 3600  # 厂商博客一周几篇，15 分钟抓一次纯属空转
 lang: en
 
 request:

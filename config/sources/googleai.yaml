@@ -3,7 +3,7 @@ display_name: Google AI 官方博客
 type: vendor
 platform: googleai
 enabled: true
-min_interval: 1800
+min_interval: 3600  # 厂商博客
 lang: en
 
 request:
