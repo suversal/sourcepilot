@@ -177,6 +177,32 @@ class ExtractSpec(BaseModel):
         return self
 
 
+class ChannelAccount(BaseModel):
+    """channel 要订阅的一个账号。
+
+    公众号那边强烈建议连 `fakeid` 一起写死，理由有两条，都不是优化而是正确性：
+
+    1. **按名字搜会搜错号。** 实测搜「智谱AI」命中的是个 2022 年就停更的同名号，
+       而智谱现在发内容的是「智谱清言」；搜「Kimi」命中的是 2018 年一个毫不
+       相干的号。同名号、山寨号、停更旧号在公众平台上极常见。
+    2. **省掉每轮的搜索请求。** 不给 fakeid 的话每个号每轮都要先搜一次，
+       18 个号就是 18 次搜索——而搜索正是公众平台上最容易触发风控的动作。
+
+    fakeid 怎么拿：`python -m sourcepilot.channels.wechat.lookup <名字>`。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    #: 公众平台的账号唯一标识。给了就直接用，跳过按名字搜索那一步。
+    fakeid: str | None = None
+
+    @classmethod
+    def coerce(cls, value):
+        """允许 YAML 里直接写字符串——老配置和只有名字的源不必改。"""
+        return cls(name=value) if isinstance(value, str) else value
+
+
 class SourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -223,9 +249,12 @@ class SourceConfig(BaseModel):
             "「第几个被列出来」伪装成「有多热」。"
         ),
     )
-    accounts: list[str] = Field(
+    accounts: list[ChannelAccount] = Field(
         default_factory=list,
-        description="channel 专用：要订阅的账号名列表（公众号 channel 用）",
+        description=(
+            "channel 专用：要订阅的账号列表。写字符串就是账号名；"
+            "公众号建议写成 `{name, fakeid}`，见 ChannelAccount 的说明。"
+        ),
     )
     backends: list[str] = Field(
         default_factory=list,
@@ -262,6 +291,14 @@ class SourceConfig(BaseModel):
     pre_request: PreRequestSpec | None = None
     request: RequestSpec | None = None
     extract: ExtractSpec | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_accounts(cls, data: Any) -> Any:
+        """YAML 里既能写 `- 量子位`，也能写 `- {name: …, fakeid: …}`。"""
+        if isinstance(data, dict) and isinstance(data.get("accounts"), list):
+            data = {**data, "accounts": [ChannelAccount.coerce(a) for a in data["accounts"]]}
+        return data
 
     @model_validator(mode="after")
     def _need_backend(self) -> SourceConfig:

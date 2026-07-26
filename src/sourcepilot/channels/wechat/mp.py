@@ -180,21 +180,29 @@ class MpBackend:
     def available(self) -> bool:
         return Credentials.load() is not None
 
-    def fetch(self, account: str, limit: int) -> list[Item]:
+    def fetch(self, account, limit: int) -> list[Item]:
         credentials = Credentials.load()
         if credentials is None:
             raise AuthExpired("公众号采集未配置")
 
+        name = getattr(account, "name", account)
+        fakeid = getattr(account, "fakeid", None)
+
         client = WechatClient(credentials)
         now = datetime.now(UTC)
-        found = client.search_account(account)
-        if not found or not found.get("fakeid"):
-            log.warning("公众号 %s 搜不到", account)
-            return []
+        if fakeid is None:
+            # 没配 fakeid 才回退到按名字搜。这条路有两个已知代价，所以只是兜底：
+            # 搜索是公众平台上最容易触发风控的动作，而且同名号/停更旧号很常见
+            # ——实测搜「智谱AI」命中的是个 2022 年就停更的号。
+            found = client.search_account(name)
+            if not found or not found.get("fakeid"):
+                log.warning("公众号 %s 搜不到", name)
+                return []
+            fakeid = found["fakeid"]
 
         items = []
-        for article in client.list_articles(found["fakeid"], limit):
-            item = _to_item(article, account, now)
+        for article in client.list_articles(fakeid, limit):
+            item = _to_item(article, name, now)
             if item is not None:
                 items.append(item)
         return items

@@ -79,7 +79,9 @@ class SogouBackend:
         parts = _REAL_URL.findall(response.text)
         return "".join(parts) if parts else None
 
-    def fetch(self, account: str, limit: int) -> list[Item]:
+    def fetch(self, account, limit: int) -> list[Item]:
+        # 搜狗只认名字，拿不到 fakeid 也用不上——它搜的是公开搜索页。
+        account = getattr(account, "name", account)
         now = datetime.now(UTC)
         with httpx.Client(
             headers={"User-Agent": DEFAULT_UA}, timeout=self.timeout, follow_redirects=True

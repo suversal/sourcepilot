@@ -350,7 +350,8 @@ class TestFallbackChain:
         called: list[str] = []
 
         def fake_fetch(self, account, limit):
-            called.append(account)
+            # 真实后端拿到的是 ChannelAccount，取 name 与它们保持一致。
+            called.append(getattr(account, "name", account))
             return []
 
         monkeypatch.setattr(SogouBackend, "fetch", fake_fetch)
@@ -414,3 +415,63 @@ class TestCooldownStateMachine:
     def test_reason_is_recorded_for_diagnosis(self):
         COOLDOWNS.penalize("x", ErrorCode.AUTH_EXPIRED)
         assert COOLDOWNS.reason("x") is ErrorCode.AUTH_EXPIRED
+
+
+class TestAccountsAcceptFakeid:
+    """按名字搜会搜错号——实测搜「智谱AI」命中的是个 2022 年就停更的同名号，
+    搜「Kimi」命中的是 2018 年一个毫不相干的号。
+
+    而且不给 fakeid 的话每个号每轮都要先搜一次，搜索正是公众平台上最容易
+    触发风控的动作。
+    """
+
+    def test_plain_string_still_works(self):
+        """老配置不该因为这个特性而失效。"""
+        from sourcepilot.sources.config import ChannelAccount, SourceConfig
+
+        c = SourceConfig(
+            name="w", display_name="公众号", channel="wechat", accounts=["量子位"]
+        )
+        assert c.accounts == [ChannelAccount(name="量子位", fakeid=None)]
+
+    def test_mapping_carries_the_fakeid(self):
+        from sourcepilot.sources.config import SourceConfig
+
+        c = SourceConfig(
+            name="w", display_name="公众号", channel="wechat",
+            accounts=[{"name": "智谱清言", "fakeid": "MzkwMDU2MTEwMg=="}],
+        )
+        assert c.accounts[0].fakeid == "MzkwMDU2MTEwMg=="
+
+    def test_fakeid_skips_the_search_call(self, monkeypatch, tmp_path):
+        """给了 fakeid 就不该再去搜——这是省下风控面的关键。"""
+        from sourcepilot.channels.wechat.mp import Credentials, MpBackend, WechatClient
+        from sourcepilot.sources.config import ChannelAccount
+
+        monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c")))
+        monkeypatch.setattr(
+            WechatClient, "search_account",
+            lambda self, kw: pytest.fail("给了 fakeid 就不该再调搜索"),
+        )
+        seen = {}
+        monkeypatch.setattr(
+            WechatClient, "list_articles",
+            lambda self, fakeid, count=20: seen.setdefault("fakeid", fakeid) and [],
+        )
+        MpBackend().fetch(ChannelAccount(name="智谱清言", fakeid="FAKEID123"), 5)
+        assert seen["fakeid"] == "FAKEID123"
+
+    def test_missing_fakeid_falls_back_to_search(self, monkeypatch):
+        """只有名字时仍要能work——否则老配置直接不采了。"""
+        from sourcepilot.channels.wechat.mp import Credentials, MpBackend, WechatClient
+        from sourcepilot.sources.config import ChannelAccount
+
+        monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c")))
+        monkeypatch.setattr(WechatClient, "search_account", lambda self, kw: {"fakeid": "SEARCHED"})
+        seen = {}
+        monkeypatch.setattr(
+            WechatClient, "list_articles",
+            lambda self, fakeid, count=20: seen.setdefault("fakeid", fakeid) and [],
+        )
+        MpBackend().fetch(ChannelAccount(name="量子位"), 5)
+        assert seen["fakeid"] == "SEARCHED"

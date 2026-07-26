@@ -54,6 +54,34 @@ backends: [mp]
 per_account_limit: 10
 account_interval: 3.0
 
+# 全部写死 fakeid，不走按名字搜索。两个理由都是正确性而不是优化：
+#   1. 同名号/停更旧号在公众平台上极常见。实测搜「智谱AI」命中的是个 2022 年
+#      就停更的号（智谱现在发内容的是「智谱清言」），搜「Kimi」命中的是 2018 年
+#      一个讲电影票的无关号。
+#   2. 不给 fakeid 的话每个号每轮都要先搜一次，18 个号就是 18 次搜索，
+#      而搜索正是公众平台上最容易触发风控的动作。
+# 下面每个号的最近更新时间都实测过（2026-07-26），停更的没收进来。
+#
+# 加新号：python -m sourcepilot.channels.wechat.lookup <名字>
 accounts:
-  - 量子位
+  # ── 国产大模型厂商官方号 ──────────────────────
+  - { name: 智谱清言,        fakeid: MzkwMDU2MTEwMg== }
+  - { name: Kimi开放平台,    fakeid: MzkyNzY4NDEzNA== }
+  - { name: 月之暗面 Kimi,   fakeid: Mzk0NDU1MDkyNg== }
+  - { name: 千问大模型,       fakeid: Mzk0ODg4NDI5NA== }
+  - { name: 零一万物 01AI,   fakeid: Mzk0OTUxNTM0NA== }
+  - { name: MiniMax 稀宇科技, fakeid: MzE5MTA3NzcxMQ== }
+  - { name: 百川智能,        fakeid: MzkzNzU0OTg0Mw== }
+  - { name: 阶跃StepFun,    fakeid: MzkyNTYxNzg5Mg== }
+  - { name: 面壁智能,        fakeid: Mzg3Mzg2MTg2NQ== }
+  - { name: 字节跳动Seed,    fakeid: MzkzMDY5MzYxNg== }
+  - { name: 腾讯混元,        fakeid: MzkwODU2OTQyNQ== }
+  - { name: 百度文心,        fakeid: MzI5NzUyMzM1Mg== }
+  - { name: 讯飞开放平台,     fakeid: MjM5NDE3OTM5MA== }
+  - { name: DeepSeek,      fakeid: Mzk0OTYwNzc3NQ== }
+  - { name: 昆仑万维集团,     fakeid: MzI1MzE1NDc3Mg== }
+  - { name: 智源研究院,       fakeid: MzI2MDcxMzQzOA== }
+  - { name: 商汤科技SenseTime, fakeid: MzIwNTcyNzYwMA== }
+  # ── 媒体号 ──────────────────────────────
+  - { name: 量子位,          fakeid: MzIzNjc1NzUzMw== }
   - 机器之心
