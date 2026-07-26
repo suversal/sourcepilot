@@ -7,7 +7,7 @@
 这条边界贯穿全部设计，下文会反复提到它为什么重要。
 
 ```
-24 个信源 · 6 个工具 · 3 个出口 · 298 项测试
+24 个信源 · 6 个工具 · 4 个出口 · 315 项测试
 ```
 
 ---
@@ -52,8 +52,8 @@ SourcePilot 把这些差异吃掉，对外只暴露一套统一的条目 schema 
 | `get_feed` | 归一化资讯流，支持关键词检索与多维过滤 | 缓存 |
 | `read_article` | 抓取指定 URL 正文并转 Markdown | 现查 |
 
-六个工具通过 **REST / MCP / SKILL.md** 三个出口暴露，共用同一套服务层——
-不是三份实现，是一套核心加三个协议壳。
+六个工具通过 **REST / MCP / SKILL.md / RSS** 四个出口暴露，共用同一套服务层——
+不是四份实现，是一套核心加四个协议壳。
 
 ## 快速开始
 
@@ -408,7 +408,25 @@ Claude Desktop 之类的客户端配置：
 MCP 的 tool schema 由契约的 pydantic 模型直接生成，**参数定义只有一份**，
 REST 与 MCP 不可能对不上（有专门的一致性对照测试）。
 
-### 三、SKILL.md（给 Agent）
+### 三、RSS（给阅读器与自动化工具）
+
+```
+/api/v1/feed.xml                              全部信源
+/api/v1/feed.xml?source=vendor&window=30d     只要厂商发布
+/api/v1/feed.xml?platform=bilibili,toutiao    指定几个信源
+/api/v1/feed.xml?q=智谱&window=all             关键词订阅
+```
+
+查询参数与 `/items` 完全一致，丢进 Reeder / Feedly / Inoreader 或 n8n / Zapier 即可。
+标题会随过滤条件变化（如「SourcePilot · 厂商发布 · 近 30d」），
+方便在阅读器里并排订阅多个切片时区分。
+
+**只出摘要，不内联正文**。RSS 是公开阅读面，不代表第三方内容因此获得再分发许可——
+每条保留原文链接与来源署名，读者落到原站去读。`time_basis` 为 `discovered` 的条目
+会在描述里明确标注「该源未提供发布时间，此处为本平台收录时间」，
+避免在阅读器里被误当成发布时间。
+
+### 四、SKILL.md（给 Agent）
 
 把 [SKILL.md](SKILL.md) 放进 Codex / Claude Code 的 skill 目录，之后可以直接问
 「X 上现在怎么看 Opus 5」，Agent 会自己路由到对应端点。
@@ -466,8 +484,9 @@ REST 与 MCP 不可能对不上（有专门的一致性对照测试）。
 ```
                     ┌──────────────────────────────────────┐
    REST  ◄──────────┤  出口层   api.py / mcp_server.py      │
-   MCP   ◄──────────┤          / SKILL.md                  │
+   MCP   ◄──────────┤          / feed.py / SKILL.md         │
    SKILL ◄──────────┤          （只做协议翻译，零业务逻辑）  │
+   RSS   ◄──────────┤                                       │
                     ├──────────────────────────────────────┤
                     │  服务层   降级 · 缓存 · 分源健康        │
                     │          services.py / x_service.py   │
@@ -537,7 +556,7 @@ vs「上次拉取之后你们又收到了什么」。混用会让首次采集把
 .venv/bin/python -m pytest && .venv/bin/ruff check src tests
 ```
 
-测试全部离线，不依赖网络。298 项测试中，契约不变量测试（`tests/test_contracts.py`）
+测试全部离线，不依赖网络。315 项测试中，契约不变量测试（`tests/test_contracts.py`）
 是最重要的一组——它们就是契约本身。
 
 进度、待办与已知问题见 [docs/progress.md](docs/progress.md)，那是进度的唯一真相源。

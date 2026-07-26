@@ -36,6 +36,7 @@
 
 - `GET /api/v1/hotlist` — 多平台热榜（缓存），单平台失败不拖垮全局
 - `GET /api/v1/items` — 归一化信息流，喂 AIRADAR，带 `since` 增量 + cursor 分页
+- `GET /api/v1/feed.xml` — RSS 2.0 订阅源（第四个出口，只出摘要不内联正文）
 - `GET /api/v1/health` — 分源采集状态（Canary 做起来之前唯一的可观测窗口）
 - `GET /api/v1/article` — 读单篇正文转 Markdown（现查，带 SSRF 防护）
 - `GET /api/v1/x/search` — 现场搜 X（**唯一的现查工具**，带超时降级回缓存）

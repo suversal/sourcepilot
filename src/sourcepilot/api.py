@@ -12,7 +12,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import __version__
 from .article import ArticleService
@@ -35,11 +35,28 @@ from .contracts import (
     SearchXParams,
     SourcePilotError,
 )
+from .feed import render_feed
 from .retention import Retention
 from .services import FeedService, HotlistService, WechatFeedService
 from .sources import SourceConfig, load_sources
 from .store import Store
 from .x_service import XSearchService, XTimelineService
+
+
+def _feed_title(params: GetFeedParams) -> str:
+    """标题要说清这个订阅源到底订的是什么——阅读器里并排放着十几个源，
+    全叫「SourcePilot」的话根本分不出谁是谁。"""
+    bits: list[str] = []
+    if params.q:
+        bits.append(f"「{params.q}」")
+    if params.platform:
+        bits.append(params.platform)
+    elif params.source:
+        bits.append({"vendor": "厂商发布", "hotlist": "平台热榜", "x": "X", "wechat": "公众号"}.get(
+            params.source.value, params.source.value
+        ))
+    bits.append(f"近 {params.window.value}")
+    return "SourcePilot · " + " · ".join(bits)
 
 
 def _envelope_response(env: Envelope, status: int = 200) -> JSONResponse:
@@ -125,6 +142,7 @@ def create_app(
                 f"{API_PREFIX}/x/search",
                 f"{API_PREFIX}/x/timeline",
                 f"{API_PREFIX}/wechat/feed",
+                f"{API_PREFIX}/feed.xml",
                 f"{API_PREFIX}/article",
                 f"{API_PREFIX}/health",
             ],
@@ -216,6 +234,31 @@ def create_app(
     ) -> Envelope[ItemsPayload]:
         """订阅公众号的最新文章（缓存）。未配置凭据时该 channel 不采集，这里返回空。"""
         return wechat.get(params)
+
+    @app.get(
+        f"{API_PREFIX}/feed.xml",
+        tags=["tools"],
+        summary="RSS 订阅",
+        response_class=Response,
+        responses={200: {"content": {"application/rss+xml": {}}}},
+    )
+    async def feed_xml(
+        request: Request,
+        params: Annotated[GetFeedParams, Query()],
+    ) -> Response:
+        """RSS 2.0 订阅源。查询参数与 /items 完全一致。
+
+        **只出摘要不内联正文**——RSS 是公开阅读面，不代表第三方内容因此获得
+        再分发许可。每条保留原文链接与来源署名，读者落到原站去读。
+        """
+        env = feed.get(params)
+        items = env.data.items if env.data else []
+        xml = render_feed(
+            items,
+            title=_feed_title(params),
+            self_url=str(request.url),
+        )
+        return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
     @app.get(f"{API_PREFIX}/article", tags=["tools"], summary="read_article")
     async def read_article(
