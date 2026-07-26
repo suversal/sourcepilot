@@ -47,6 +47,12 @@ class Account:
     cookie: str
     #: 从 cookie 里的 ct0 取，GraphQL 要求 x-csrf-token 与之相等。
     csrf: str = ""
+    #: 签发这份 cookie 的那个浏览器的 UA。**强烈建议填**——
+    #: cookie 是 Chrome 150 签发的、请求却报称 Chrome 131，这个自相矛盾本身
+    #: 就是风控信号。不填则按账号名从池里挑一个固定的。
+    user_agent_override: str | None = None
+    #: 同一浏览器的客户端提示头（sec-ch-ua 那几个）。填了能让指纹更自洽。
+    client_hints: dict[str, str] = field(default_factory=dict)
     active: bool = True
     #: 每个 endpoint 单独记限流——搜索被限不代表时间线也被限。
     locked_until: dict[str, float] = field(default_factory=dict)
@@ -57,11 +63,13 @@ class Account:
 
     @property
     def user_agent(self) -> str:
+        if self.user_agent_override:
+            return self.user_agent_override
         seed = int(hashlib.sha256(self.name.encode()).hexdigest()[:8], 16)
         return _UA_POOL[seed % len(_UA_POOL)]
 
     def headers(self, bearer: str) -> dict[str, str]:
-        return {
+        headers = {
             "Authorization": f"Bearer {bearer}",
             "Cookie": self.cookie,
             "x-csrf-token": self.csrf,
@@ -72,6 +80,8 @@ class Account:
             "Referer": "https://x.com/",
             "Accept": "*/*",
         }
+        headers.update(self.client_hints)
+        return headers
 
     def __repr__(self) -> str:  # 别让 cookie 从日志或异常栈漏出去
         return f"<Account {self.name} active={self.active} cookie=***>"
@@ -102,7 +112,12 @@ class AccountPool:
             if not cookie:
                 log.warning("账号 %s 没有 cookie，跳过", name)
                 continue
-            account = Account(name=name, cookie=cookie)
+            account = Account(
+                name=name,
+                cookie=cookie,
+                user_agent_override=entry.get("user_agent"),
+                client_hints=dict(entry.get("client_hints") or {}),
+            )
             if not account.csrf:
                 # 没有 ct0 就一定过不了 GraphQL，早点说清楚好过让它反复失败。
                 log.warning("账号 %s 的 cookie 里没有 ct0，跳过", name)

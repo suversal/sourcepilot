@@ -1,0 +1,30 @@
+# 复制成 config/x_accounts.yaml 再填（那个文件已在 .gitignore 里，不会进仓库）。
+#
+# ── 怎么取 ──────────────────────────────────────────────
+# 浏览器登录 x.com 后打开开发者工具：
+#   Application → Storage → Cookies → https://x.com
+#   找 auth_token 和 ct0 两行，拼成 "auth_token=...; ct0=..."
+# 或者在 Network 面板任一 x.com/i/api/graphql/... 请求上
+#   右键 → Copy → Copy as cURL，从里面抠出 cookie 那一段。
+#
+# ── 必须有 ct0 ─────────────────────────────────────────
+# GraphQL 要求 x-csrf-token 与 cookie 里的 ct0 相等，缺了一定被拒。
+# 代码会自己从 cookie 里提取，不用单独填。
+#
+# ── 强烈建议用专用小号 ───────────────────────────────────
+# 这条线抓的是 X 内部 GraphQL，不是官方开放 API，有封号风险。
+
+accounts:
+  - name: acct1
+    cookie: "auth_token=<你的>; ct0=<你的>"
+
+    # 签发这份 cookie 的那个浏览器的 UA。建议照抄开发者工具里看到的那一行——
+    # cookie 是 Chrome 150 签发的、请求却报称 Chrome 131，这个自相矛盾本身
+    # 就是风控信号。不填则按账号名从内置池里挑一个固定的。
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+
+    # 同一浏览器的客户端提示头，照抄即可，让指纹更自洽。
+    client_hints:
+      sec-ch-ua: '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+      sec-ch-ua-mobile: "?0"
+      sec-ch-ua-platform: '"macOS"'
