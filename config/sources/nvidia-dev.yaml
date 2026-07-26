@@ -1,0 +1,13 @@
+name: nvidia-dev
+display_name: NVIDIA 开发者博客
+type: vendor
+platform: nvidia-dev
+enabled: true
+min_interval: 21600
+lang: en
+
+request:
+  url: https://developer.nvidia.com/blog/feed/
+
+extract:
+  format: rss

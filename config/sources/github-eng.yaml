@@ -1,0 +1,13 @@
+name: github-eng
+display_name: GitHub 工程博客
+type: vendor
+platform: github-eng
+enabled: true
+min_interval: 21600
+lang: en
+
+request:
+  url: https://github.blog/engineering/feed/
+
+extract:
+  format: rss

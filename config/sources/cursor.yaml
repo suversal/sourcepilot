@@ -1,0 +1,13 @@
+name: cursor
+display_name: Cursor 更新日志
+type: vendor
+platform: cursor
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://cursor.com/changelog/rss.xml
+
+extract:
+  format: rss

@@ -1,0 +1,13 @@
+name: github-ai
+display_name: GitHub AI & ML 博客
+type: vendor
+platform: github-ai
+enabled: true
+min_interval: 14400
+lang: en
+
+request:
+  url: https://github.blog/ai-and-ml/feed/
+
+extract:
+  format: rss
