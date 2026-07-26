@@ -22,19 +22,21 @@ GUEST_ACTIVATE = "https://api.x.com/1.1/guest/activate.json"
 
 #: operation id → 名称。**会过期**，过期表现为 GraphQL 404。
 #: 更新方式见模块文档。
+#: 抓取自浏览器里的真实请求（2026-07-26）。原先那组是凭记忆写的，实测**全部过期**。
 OPERATIONS: dict[str, str] = {
-    "SearchTimeline": "MJpyQGqgklrVl_0X9gNy3A",
-    "UserByScreenName": "32pL5BWe9WKeSK1MoPvFQQ",
-    "UserTweets": "V7H0Ap3_Hh2FyS75OCDO3Q",
-    "TweetDetail": "VWFGPVAGkZMGRKGe3GFFnA",
+    "SearchTimeline": "kn0jeHGOUFYdNe_FUxwxsQ",
+    "UserByScreenName": "2qvSHpkWTMS9i0zJAwDNiA",
+    "UserTweets": "RIylB10EGWyBSs4ZXpQjCw",
 }
 
 #: GraphQL 的 features flag。X 会不定期增删；缺字段时它会明确报
 #: 「The following features cannot be null」，把报的字段补进来即可。
 DEFAULT_FEATURES: dict[str, bool] = {
     "rweb_video_screen_enabled": False,
+    "rweb_cashtags_enabled": True,
     "profile_label_improvements_pcf_label_in_post_enabled": True,
-    "rweb_tipjar_consumption_enabled": True,
+    "responsive_web_profile_redirect_enabled": True,
+    "rweb_tipjar_consumption_enabled": False,
     "verified_phone_label_enabled": False,
     "creator_subscriptions_tweet_preview_api_enabled": True,
     "responsive_web_graphql_timeline_navigation_enabled": True,
@@ -44,22 +46,49 @@ DEFAULT_FEATURES: dict[str, bool] = {
     "c9s_tweet_anatomy_moderator_badge_enabled": True,
     "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
     "responsive_web_grok_analyze_post_followups_enabled": True,
-    "responsive_web_jetfuel_frame": False,
+    "rweb_cashtags_composer_attachment_enabled": True,
+    "responsive_web_jetfuel_frame": True,
     "responsive_web_grok_share_attachment_enabled": True,
+    "responsive_web_grok_annotations_enabled": True,
     "articles_preview_enabled": True,
     "responsive_web_edit_tweet_api_enabled": True,
+    "rweb_conversational_replies_downvote_enabled": False,
     "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
     "view_counts_everywhere_api_enabled": True,
     "longform_notetweets_consumption_enabled": True,
     "responsive_web_twitter_article_tweet_consumption_enabled": True,
-    "tweet_awards_web_tipping_enabled": False,
-    "creator_subscriptions_quote_tweet_preview_enabled": False,
+    "content_disclosure_indicator_enabled": True,
+    "content_disclosure_ai_generated_indicator_enabled": True,
+    "responsive_web_grok_show_grok_translated_post": True,
+    "responsive_web_grok_analysis_button_from_backend": True,
+    "post_ctas_fetch_enabled": False,
     "freedom_of_speech_not_reach_fetch_enabled": True,
     "standardized_nudges_misinfo": True,
     "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
     "longform_notetweets_rich_text_read_enabled": True,
-    "longform_notetweets_inline_media_enabled": True,
+    "longform_notetweets_inline_media_enabled": False,
+    "responsive_web_grok_image_annotation_enabled": True,
+    "responsive_web_grok_imagine_annotation_enabled": True,
+    "responsive_web_grok_community_note_auto_translation_is_enabled": True,
     "responsive_web_enhance_cards_enabled": False,
+}
+
+#: UserByScreenName 用的是另一套更短的 features——照抄真实请求，
+#: 多给或少给都可能被拒（X 会明确报「The following features cannot be null」）。
+USER_FEATURES: dict[str, bool] = {
+    "hidden_profile_subscriptions_enabled": True,
+    "profile_label_improvements_pcf_label_in_post_enabled": True,
+    "responsive_web_profile_redirect_enabled": True,
+    "rweb_tipjar_consumption_enabled": False,
+    "verified_phone_label_enabled": False,
+    "subscriptions_verification_info_is_identity_verified_enabled": True,
+    "subscriptions_verification_info_verified_since_enabled": True,
+    "highlights_tweets_tab_ui_enabled": True,
+    "responsive_web_twitter_article_notes_tab_enabled": True,
+    "subscriptions_feature_can_gift_premium": True,
+    "creator_subscriptions_tweet_preview_api_enabled": True,
+    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+    "responsive_web_graphql_timeline_navigation_enabled": True,
 }
 
 #: FxTwitter：Discord 嵌入卡片用的公开服务，自己处理所有认证，零依赖零 Key。

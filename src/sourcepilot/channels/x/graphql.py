@@ -24,7 +24,7 @@ import httpx
 
 from ...contracts import Item, Media, MediaType, Source, SourceType, TimeBasis, UpstreamDown
 from .accounts import Account, AccountPool
-from .config import DEFAULT_FEATURES, GRAPHQL_BASE, OPERATIONS, PUBLIC_BEARER
+from .config import DEFAULT_FEATURES, GRAPHQL_BASE, OPERATIONS, PUBLIC_BEARER, USER_FEATURES
 
 log = logging.getLogger("sourcepilot.channels.x")
 
@@ -197,7 +197,15 @@ class GraphQLBackend:
     def available(self) -> bool:
         return bool(self.pool.accounts)
 
-    def _request(self, account: Account, operation: str, variables: dict[str, Any]) -> dict:
+    def _request(
+        self,
+        account: Account,
+        operation: str,
+        variables: dict[str, Any],
+        *,
+        features: dict[str, bool] | None = None,
+        field_toggles: dict[str, Any] | None = None,
+    ) -> dict:
         import json
 
         query_id = OPERATIONS.get(operation)
@@ -207,8 +215,10 @@ class GraphQLBackend:
         path = f"/{query_id}/{operation}"
         params = {
             "variables": json.dumps(variables, separators=(",", ":")),
-            "features": json.dumps(DEFAULT_FEATURES, separators=(",", ":")),
+            "features": json.dumps(features or DEFAULT_FEATURES, separators=(",", ":")),
         }
+        if field_toggles is not None:
+            params["fieldToggles"] = json.dumps(field_toggles, separators=(",", ":"))
         headers = account.headers(PUBLIC_BEARER)
         if self.signer is not None:
             headers["x-client-transaction-id"] = self.signer.sign("GET", f"/i/api/graphql{path}")
@@ -249,11 +259,14 @@ class GraphQLBackend:
         self, query: str, limit: int, cursor: str | None = None
     ) -> tuple[list[Item], str | None]:
         account = self.pool.acquire("SearchTimeline")
+        # 参数照抄浏览器里的真实请求（2026-07-26 抓取）。
         variables = {
             "rawQuery": query,
             "count": min(limit, 20),
-            "querySource": "typed_query",
+            "querySource": "",
             "product": "Latest",  # 按时间倒序，不是「热门」——资讯要的是最新
+            "withGrokTranslatedBio": False,
+            "withQuickPromoteEligibilityTweetFields": False,
         }
         if cursor:
             variables["cursor"] = cursor
@@ -267,13 +280,17 @@ class GraphQLBackend:
         variables = {
             "userId": user_id,
             "count": min(limit, 20),
-            "includePromotedContent": False,
-            "withQuickPromoteEligibilityTweetFields": False,
-            "withVoice": False,
+            # 真实请求里这三个都是 true；改成 false 属于「自作聪明」，
+            # 参数组合与前端不一致本身就可能被当成异常流量。
+            "includePromotedContent": True,
+            "withQuickPromoteEligibilityTweetFields": True,
+            "withVoice": True,
         }
         if cursor:
             variables["cursor"] = cursor
-        payload = self._request(account, "UserTweets", variables)
+        payload = self._request(
+            account, "UserTweets", variables, field_toggles={"withArticlePlainText": False}
+        )
         return walk_timeline(payload, datetime.now(UTC))
 
     def user_id(self, handle: str) -> str | None:
@@ -281,6 +298,9 @@ class GraphQLBackend:
         payload = self._request(
             account,
             "UserByScreenName",
-            {"screen_name": handle.lstrip("@"), "withSafetyModeUserFields": True},
+            {"screen_name": handle.lstrip("@"), "withGrokTranslatedBio": True},
+            # 这个 operation 用的是另一套更短的 features，给错会被拒。
+            features=USER_FEATURES,
+            field_toggles={"withPayments": False, "withAuxiliaryUserLabels": True},
         )
         return (((payload.get("data") or {}).get("user") or {}).get("result") or {}).get("rest_id")
