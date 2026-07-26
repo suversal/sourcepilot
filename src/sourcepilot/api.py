@@ -35,6 +35,7 @@ from .contracts import (
     SearchXParams,
     SourcePilotError,
 )
+from .retention import Retention
 from .services import FeedService, HotlistService, WechatFeedService
 from .sources import SourceConfig, load_sources
 from .store import Store
@@ -56,12 +57,13 @@ def create_app(
     collector = Collector(store, sources)
     canary = Canary(store, sources)
     hotlist = HotlistService(collector)
-    feed = FeedService(store)
+    feed = FeedService(store, sources)
     article = ArticleService()
     wechat = WechatFeedService(store)
     x_search = XSearchService(store)
     x_timeline = XTimelineService(store)
-    background = Scheduler(collector)
+    retention = Retention(store)
+    background = Scheduler(collector, retention=retention)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

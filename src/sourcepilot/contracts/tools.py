@@ -41,6 +41,13 @@ class _Params(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def split_platforms(value: str | None) -> list[str]:
+    """把 `a,b, c` 拆成 ['a','b','c']。空串与多余空格都容忍。"""
+    if not value:
+        return []
+    return [p.strip() for p in value.split(",") if p.strip()]
+
+
 class Paginated(_Params):
     cursor: str | None = Field(
         default=None, description="来自上次响应的 meta.next_cursor，opaque"
@@ -70,7 +77,8 @@ class GetXTimelineParams(Paginated):
 
 class GetHotlistParams(_Params):
     platform: str | None = Field(
-        default=None, description="weibo|zhihu|douyin|bilibili…  不填 = 全部"
+        default=None,
+        description="bilibili|toutiao|juejin…  逗号分隔可给多个，不填 = 全部",
     )
     limit: int = Field(default=20, ge=1, le=50, description="每平台条数")
 
@@ -97,7 +105,11 @@ class GetFeedParams(Paginated):
     )
     platform: str | None = Field(
         default=None,
-        description="按具体信源过滤，如 openai / anthropic / bilibili；取值见 /health",
+        description=(
+            "按具体信源过滤，逗号分隔可给多个，如 `bilibili,toutiao,juejin`。"
+            "取值见 /health。显式列举而不是按语言之类的属性派生——"
+            "不同消费方要的组合不同，名单该由消费方自己定"
+        ),
     )
     window: Window = Window.H24
     category: Category | None = Field(

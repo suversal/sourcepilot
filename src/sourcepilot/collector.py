@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -101,9 +102,19 @@ class Scheduler:
     的源永远不会被抓，库里会一直是空的。
     """
 
-    def __init__(self, collector: Collector, tick_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        collector: Collector,
+        tick_seconds: float = 60.0,
+        retention=None,
+        sweep_every: float = 6 * 3600,
+    ) -> None:
         self.collector = collector
         self.tick_seconds = tick_seconds
+        #: 保留策略。给 None 就不清理——测试和一次性脚本不该动数据。
+        self.retention = retention
+        self.sweep_every = sweep_every
+        self._last_sweep = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -133,4 +144,15 @@ class Scheduler:
                     log.info("定时采集：%d 个源到点，%d 个成功", len(outcomes), ok)
             except Exception:  # 调度线程绝不能因为单次异常而死掉
                 log.exception("定时采集出错，下一轮继续")
+
+            # 清理挂在采集之后、同一个线程里——它是低频操作，不值得单开线程，
+            # 而且和采集串行能避免「边删边写」。
+            if self.retention is not None:
+                now = time.monotonic()
+                if now - self._last_sweep >= self.sweep_every:
+                    self._last_sweep = now
+                    try:
+                        self.retention.sweep()
+                    except Exception:
+                        log.exception("保留策略清理出错，不影响采集")
             self._stop.wait(self.tick_seconds)

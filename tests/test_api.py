@@ -263,3 +263,53 @@ class TestSearch:
         ).json()
         items = body["data"]["items"]
         assert len(items) == 1 and items[0]["source"]["platform"] == "fake"
+
+
+class TestMultiPlatformFilter:
+    """平台过滤要能一次给多个。
+
+    显式列举而不是按 lang 之类的属性派生：不同消费方要的组合不同
+    （AIRADAR 要国内源、别的用户可能只要厂商发布），名单该由消费方自己定。
+    """
+
+    def _fill(self, client):
+        client.get("/api/v1/hotlist")  # 灌两个源的数据进库
+
+    def test_single_platform_still_works(self, client):
+        self._fill(client)
+        body = client.get("/api/v1/items", params={"platform": "fake", "window": "30d"}).json()
+        assert body["ok"] is True
+        assert {i["source"]["platform"] for i in body["data"]["items"]} == {"fake"}
+
+    def test_comma_separated_returns_the_union(self, client):
+        self._fill(client)
+        body = client.get(
+            "/api/v1/items", params={"platform": "fake,other", "window": "30d"}
+        ).json()
+        assert {i["source"]["platform"] for i in body["data"]["items"]} == {"fake", "other"}
+
+    def test_whitespace_around_names_is_tolerated(self, client):
+        self._fill(client)
+        body = client.get(
+            "/api/v1/items", params={"platform": " fake , other ", "window": "30d"}
+        ).json()
+        assert len(body["data"]["items"]) > 0
+
+    def test_unknown_platform_names_are_reported_by_name(self, client):
+        """打错名字必须当场说清楚——否则表现为「查不到数据」，
+        会被误认为是没有新内容，而不是参数写错了。"""
+        r = client.get("/api/v1/items", params={"platform": "fake,不存在的源"})
+        assert r.status_code == 400
+        body = r.json()
+        assert body["error"]["code"] == "BAD_REQUEST"
+        assert "不存在的源" in body["error"]["message"]
+        assert "fake" in body["error"]["message"], "报错里要带上可用清单"
+
+    def test_hotlist_endpoint_also_accepts_multiple(self, client):
+        body = client.get("/api/v1/hotlist", params={"platform": "fake,other"}).json()
+        assert {s["name"] for s in body["meta"]["sources"]} == {"fake", "other"}
+
+    def test_empty_platform_means_all(self, client):
+        self._fill(client)
+        body = client.get("/api/v1/items", params={"platform": "", "window": "30d"}).json()
+        assert len({i["source"]["platform"] for i in body["data"]["items"]}) == 2

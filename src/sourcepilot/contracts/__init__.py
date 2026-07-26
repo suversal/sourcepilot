@@ -41,6 +41,7 @@ from .tools import (
     SearchXParams,
     ToolSpec,
     Window,
+    split_platforms,
 )
 from .version import API_PREFIX, CONTRACT_VERSION
 
@@ -82,5 +83,6 @@ __all__ = [
     "Timeout",
     "UpstreamDown",
     "Window",
+    "split_platforms",
     "to_utc",
 ]

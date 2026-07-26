@@ -220,6 +220,22 @@ class Store:
         with self._conn() as conn:
             return [_row_to_item(r) for r in conn.execute(sql, args).fetchall()]
 
+    def count_items_before(self, source_type: SourceType, cutoff: datetime) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM items WHERE source_type = ? AND effective_at < ?",
+                (source_type.value, _iso(cutoff)),
+            ).fetchone()[0]
+
+    def delete_items_before(self, source_type: SourceType, cutoff: datetime) -> int:
+        """按发布时间删。用 discovered_at 的话，一篇今天才被发现的旧文会被立刻删掉。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM items WHERE source_type = ? AND effective_at < ?",
+                (source_type.value, _iso(cutoff)),
+            )
+            return cur.rowcount
+
     def count_items(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]

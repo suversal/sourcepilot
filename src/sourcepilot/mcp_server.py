@@ -57,7 +57,7 @@ def build_handlers(
         "get_hotlist": HotlistService(collector).get,
         "get_wechat_feed": WechatFeedService(store).get,
         "read_article": ArticleService().get,
-        "get_feed": FeedService(store).get,
+        "get_feed": FeedService(store, sources).get,
     }
 
 

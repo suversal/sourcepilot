@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.3.0
+# SourcePilot · 工具契约 v1.4.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.3.0",
+    "contract_version": "1.4.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -329,7 +329,8 @@ live=false → 只读缓存 → mode=cache, stale=false（这是用户要的，�
 ```
 入参
   q         string  选填  关键词，在标题与摘要里做子串匹配（v1.2.0 新增）
-  platform  string  选填  按具体信源过滤，如 openai / bilibili（v1.2.0 新增）
+  platform  string  选填  按具体信源过滤，**逗号分隔可给多个**（v1.4.0）
+                          如 `bilibili,toutiao,juejin`；名字不认识会报 BAD_REQUEST 并列出可用值
   window    enum    选填  默认 24h；检索历史用 all
   category  string  选填  单个分类，匹配 Item.categories 中任一项
   source    string  选填  按 source.type 过滤

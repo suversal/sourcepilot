@@ -20,6 +20,7 @@ from .contracts import (
     Meta,
     Mode,
     SourceType,
+    split_platforms,
 )
 from .store import Store, encode_cursor
 
@@ -39,13 +40,17 @@ class HotlistService:
     def _configs(self, platform: str | None):
         """只认 hotlist 类型的源——厂商发布那类走 /items，不该混进热榜。"""
         configs = self.collector.enabled(types=[SourceType.HOTLIST])
-        if platform is None:
+        wanted = split_platforms(platform)
+        if not wanted:
             return configs
-        picked = [c for c in configs if c.platform == platform or c.name == platform]
-        if not picked:
-            known = sorted({c.platform or c.name for c in configs})
-            raise BadRequest(f"未知平台 {platform!r}，可用：{', '.join(known)}")
-        return picked
+        known = {c.platform or c.name for c in configs}
+        unknown = [p for p in wanted if p not in known]
+        if unknown:
+            # 报出到底哪个名字不认识 + 可用清单，调用方才改得动。
+            raise BadRequest(
+                f"未知平台 {', '.join(repr(p) for p in unknown)}，可用：{', '.join(sorted(known))}"
+            )
+        return [c for c in configs if (c.platform or c.name) in wanted]
 
     def get(self, params: GetHotlistParams) -> Envelope[ItemsPayload]:
         started = time.perf_counter()
@@ -93,14 +98,31 @@ class HotlistService:
 
 
 class FeedService:
-    """`get_feed`：喂 AIRADAR 的归一化信息流。纯缓存，带增量与分页。
+    """`get_feed`：喂下游的归一化信息流。纯缓存，带增量与分页。
 
     这里不触发抓取——库由后台调度器填。查询路径上不做网络请求，才能保证
-    AIRADAR 每次拿数据都是毫秒级。
+    消费方每次拿数据都是毫秒级。
     """
 
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, sources: dict | None = None) -> None:
         self.store = store
+        # 用来校验 platform 名字。消费方按名单挑信源，名字打错必须当场说清楚，
+        # 否则表现为「查不到数据」，那会被误认为是没有新内容。
+        self._sources = sources or {}
+
+    def _platforms(self, value: str | None) -> list[str] | None:
+        wanted = split_platforms(value)
+        if not wanted:
+            return None
+        if self._sources:
+            known = {c.platform or name for name, c in self._sources.items()}
+            unknown = [p for p in wanted if p not in known]
+            if unknown:
+                raise BadRequest(
+                    f"未知平台 {', '.join(repr(p) for p in unknown)}，"
+                    f"可用：{', '.join(sorted(known))}"
+                )
+        return wanted
 
     def get(self, params: GetFeedParams) -> Envelope[ItemsPayload]:
         started = time.perf_counter()
@@ -111,7 +133,7 @@ class FeedService:
         # 多取一条用来判断 has_more，返回前砍掉。
         rows = self.store.query_items(
             source_type=params.source,
-            platforms=[params.platform] if params.platform else None,
+            platforms=self._platforms(params.platform),
             category=params.category,
             q=params.q,
             since=params.since,
