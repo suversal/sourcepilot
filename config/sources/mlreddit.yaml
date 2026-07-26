@@ -1,3 +1,9 @@
+# 已禁用。2026-07-26 与 AIRADAR 实际启用状态对齐——它库里这个源是
+# is_active=false，按「以 AIRADAR 数据库为准」的约定一并关掉。
+#
+# 源本身是可用的（实测通过，有完整时间与摘要），配置留在仓库里，
+# 要恢复只需把 enabled 改回 true。
+#
 # Reddit 的 RSS 对默认 UA 很敏感——实测 python-httpx 的默认 UA 直接 429。
 # 换成带联系方式的自报家门 UA 就能过，这也是 Reddit 文档要求的做法。
 # 间隔特意与 localllama 错开（2h vs 3h）——两个 reddit 源落在同一轮采集时，
@@ -6,7 +12,7 @@ name: mlreddit
 display_name: Reddit r/MachineLearning
 type: rss
 platform: mlreddit
-enabled: true
+enabled: false
 min_interval: 10800
 lang: en
 

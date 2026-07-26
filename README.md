@@ -7,7 +7,7 @@
 这条边界贯穿全部设计，下文会反复提到它为什么重要。
 
 ```
-44 个信源 · 6 个工具 · 4 个出口 · 345 项测试
+37 个信源 · 6 个工具 · 4 个出口 · 345 项测试
 ```
 
 ---
@@ -74,7 +74,7 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 
 ## 信源清单
 
-44 个启用源，实测数据量（截至最近一次运行）：
+37 个启用源，实测数据量（截至最近一次运行）：
 
 ### 厂商官方发布（`source=vendor`，一手信息）
 
@@ -83,6 +83,8 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 | OpenAI | RSS | 1050 |
 | Google DeepMind | RSS | 100 |
 | Hugging Face | RSS | 100 |
+| NVIDIA 开发者 | RSS | 100 |
+| Cursor 更新日志 | RSS | 50 |
 | 通义千问 Qwen | RSS | 44 |
 | 智谱 GLM | HTML（开放平台更新日志） | 24 |
 | AWS 机器学习 | RSS | 20 |
@@ -90,6 +92,8 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 | NVIDIA | RSS | 18 |
 | DeepSeek | HTML（api-docs 侧栏） | 15 |
 | Anthropic | HTML（/news 列表页） | 12 |
+| GitHub AI & ML | RSS | 10 |
+| GitHub 工程博客 | RSS | 10 |
 | 字节 Seed | HTML + 标题 slug 推导 | 8 |
 | Kimi（月之暗面） | HTML | 8 |
 
@@ -97,43 +101,30 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 
 | 源 | 抓取方式 | 条目 |
 |---|---|---|
-| 今日头条 | JSON | 374 |
+| 今日头条 | JSON | 382 |
 | AIHOT | JSON | 189 |
-| IT之家 | RSS | 171 |
-| B站排行榜 | JSON | 152 |
-| Hacker News | JSON（Algolia 官方 API） | 116 |
-| LINUX DO | JSON（**需 TLS 指纹伪装**） | 112 |
+| B站排行榜 | JSON | 154 |
+| Hacker News | JSON（Algolia 官方 API） | 118 |
+| LINUX DO | JSON（**需 TLS 指纹伪装**） | 113 |
 | Product Hunt | RSS | 92 |
-| 36氪 | RSS | 85 |
-| 掘金 | JSON | 61 |
-| 远景论坛 | RSS | 34 |
+| IT之家 | RSS | 64 |
+| 掘金 | JSON | 62 |
+| 36氪 | RSS | 60 |
+| 远景论坛 | RSS | 35 |
 | 少数派 | JSON | 31 |
-| V2EX | JSON | 28 |
+| V2EX | JSON | 29 |
 | GitHub Trending | HTML | 25 |
 | Solidot | RSS | 24 |
 
-### 媒体 · 研究 · 社区（`source=rss`）
-
-2026-07-26 从 AIRADAR 迁入，全部走官方 RSS。
+### 媒体（`source=rss`）
 
 | 源 | 条目 |
 |---|---|
-| Smol AI News | 100 |
-| Simon Willison | 30 |
-| Reddit r/LocalLLaMA | 25 |
-| Reddit r/MachineLearning | 25 |
 | 爱范儿 | 20 |
 | InfoQ 中国 | 20 |
 | Latent Space | 20 |
 | TechCrunch AI | 20 |
-| TLDR AI | 20 |
-| BAIR 伯克利 | 10 |
-| MIT 科技评论 AI | 10 |
-| 微软研究院 | 10 |
 | 量子位官网 | 10 |
-| The Decoder | 10 |
-| The Verge AI | 10 |
-| VentureBeat AI | 7 |
 
 ### 微信公众号（`source=wechat`）
 
@@ -147,6 +138,10 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 
 - **微博** — 不带 cookie 直接 403，等 Canary 能发现 cookie 失效后再启用
 - **酷安** — 需要设备参数算 `X-App-Token`，签名属重逻辑范畴
+- **11 个媒体/研究/社区 RSS** — BAIR、微软研究院、MIT 科技评论、Simon Willison、
+  Smol AI、The Decoder、The Verge、VentureBeat、TLDR AI、两个 Reddit 板块。
+  源本身实测可用且字段完整，关掉是为了**与 AIRADAR 的实际启用清单对齐**——
+  它库里这些是 `is_active=false`。要恢复只需改一行 `enabled`
 - **搜狗微信** — 实测数据陈旧（量子位只出 2 条且含 2019 年的、机器之心 9 条全是 2017 年），
   且约 20 次请求就触发验证码。**一个静默返回旧文的兜底比没有兜底更危险**
 

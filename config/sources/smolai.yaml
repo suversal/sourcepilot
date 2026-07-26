@@ -1,8 +1,13 @@
+# 已禁用。2026-07-26 与 AIRADAR 实际启用状态对齐——它库里这个源是
+# is_active=false，按「以 AIRADAR 数据库为准」的约定一并关掉。
+#
+# 源本身是可用的（实测通过，有完整时间与摘要），配置留在仓库里，
+# 要恢复只需把 enabled 改回 true。
 name: smolai
 display_name: Smol AI News
 type: rss
 platform: smolai
-enabled: true
+enabled: false
 min_interval: 14400
 lang: en
 
