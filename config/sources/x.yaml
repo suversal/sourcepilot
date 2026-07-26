@@ -24,7 +24,7 @@ name: x
 display_name: X / Twitter
 type: x
 platform: x
-enabled: false
+enabled: true
 channel: x
 min_interval: 900
 lang: en
@@ -34,6 +34,6 @@ nitter_instances: []
 
 # 定时采集这些账号的时间线进库。库里有东西，search_x 现查失败时的降级才有意义。
 per_account_limit: 20
-accounts: []
-  # - OpenAI
-  # - AnthropicAI
+accounts:
+  - OpenAI
+  - AnthropicAI
