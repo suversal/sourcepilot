@@ -1,6 +1,7 @@
 """按名字查公众号的 fakeid，顺带报告它最近还更不更新。
 
-    python -m sourcepilot.channels.wechat.lookup 智谱
+    python -m sourcepilot.channels.wechat.lookup 智谱        # 按昵称
+    python -m sourcepilot.channels.wechat.lookup zhipu_ai   # 按微信号（更准）
 
 **为什么要有这个工具**：公众平台上同名号、山寨号、停更旧号极常见。实测搜
 「智谱AI」命中的是个 2022 年就停更的号，而智谱现在发内容的是「智谱清言」；
@@ -52,10 +53,13 @@ def lookup(keyword: str, limit: int = 5) -> int:
                 recency = f"{published:%Y-%m-%d}（{days} 天前）"
             else:
                 recency = "没有可见文章"
-        print(f"  {item['nickname']}")
+        exact = " ★ 微信号精确匹配" if item.get("alias") == keyword else ""
+        print(f"  {item['nickname']}{exact}")
         print(f"    fakeid: {item['fakeid']}")
+        print(f"    微信号: {item.get('alias') or '（无）'}")
         print(f"    最近更新: {recency}\n")
     print("挑更新最近的那个写进 accounts，别只看名字对不对。")
+    print("用微信号搜最准——它全平台唯一且不可改，昵称既会改也会重名。")
     return 0
 
 

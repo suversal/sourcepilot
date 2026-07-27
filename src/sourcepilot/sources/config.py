@@ -196,6 +196,10 @@ class ChannelAccount(BaseModel):
     name: str
     #: 公众平台的账号唯一标识。给了就直接用，跳过按名字搜索那一步。
     fakeid: str | None = None
+    #: 微信号（公众平台里的 alias）。**不参与请求**，纯粹是给人看的身份凭据——
+    #: nickname 会改、会重名，微信号不会。fakeid 哪天失效时，靠它能重新查回来
+    #: （`lookup <微信号>` 会按 alias 精确匹配）。
+    alias: str | None = None
 
     @classmethod
     def coerce(cls, value):

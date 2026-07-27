@@ -65,23 +65,30 @@ account_interval: 3.0
 # 加新号：python -m sourcepilot.channels.wechat.lookup <名字>
 accounts:
   # ── 国产大模型厂商官方号 ──────────────────────
-  - { name: 智谱清言,        fakeid: MzkwMDU2MTEwMg== }
-  - { name: Kimi开放平台,    fakeid: MzkyNzY4NDEzNA== }
-  - { name: 月之暗面 Kimi,   fakeid: Mzk0NDU1MDkyNg== }
-  - { name: 千问大模型,       fakeid: Mzk0ODg4NDI5NA== }
-  - { name: 零一万物 01AI,   fakeid: Mzk0OTUxNTM0NA== }
-  - { name: MiniMax 稀宇科技, fakeid: MzE5MTA3NzcxMQ== }
-  - { name: 百川智能,        fakeid: MzkzNzU0OTg0Mw== }
-  - { name: 阶跃StepFun,    fakeid: MzkyNTYxNzg5Mg== }
-  - { name: 面壁智能,        fakeid: Mzg3Mzg2MTg2NQ== }
-  - { name: 字节跳动Seed,    fakeid: MzkzMDY5MzYxNg== }
-  - { name: 腾讯混元,        fakeid: MzkwODU2OTQyNQ== }
-  - { name: 百度文心,        fakeid: MzI5NzUyMzM1Mg== }
-  - { name: 讯飞开放平台,     fakeid: MjM5NDE3OTM5MA== }
-  - { name: DeepSeek,      fakeid: Mzk0OTYwNzc3NQ== }
-  - { name: 昆仑万维集团,     fakeid: MzI1MzE1NDc3Mg== }
-  - { name: 智源研究院,       fakeid: MzI2MDcxMzQzOA== }
+  # alias 是微信号：不参与请求，但 nickname 会改会重名，微信号不会。
+  # fakeid 哪天失效时靠它重新查回来（lookup 会按 alias 精确匹配）。
+  - { name: 智谱清言,          fakeid: MzkwMDU2MTEwMg== }
+  - { name: 智谱,             fakeid: MzkyMzI3NzQ0Mg==, alias: zhipu_ai }
+  - { name: Kimi开放平台,      fakeid: MzkyNzY4NDEzNA== }
+  - { name: 月之暗面 Kimi,     fakeid: Mzk0NDU1MDkyNg== }
+  - { name: 千问大模型,        fakeid: Mzk0ODg4NDI5NA== }
+  - { name: 通义实验室,        fakeid: MzkxMTYyMTAzNA==, alias: AlibabaTongYiQianWen }
+  - { name: 零一万物 01AI,     fakeid: Mzk0OTUxNTM0NA== }
+  # MiniMax 两个号是不同的：稀宇科技偏公司动态，开放平台偏 API/开发者。
+  - { name: MiniMax 稀宇科技,  fakeid: MzE5MTA3NzcxMQ==, alias: minimax-openplatform }
+  - { name: MiniMax开放平台,   fakeid: MzYzOTEwNjEyNw==, alias: minimax-platform }
+  - { name: 百川智能,          fakeid: MzkzNzU0OTg0Mw== }
+  - { name: 阶跃StepFun,      fakeid: MzkyNTYxNzg5Mg== }
+  - { name: 面壁智能,          fakeid: Mzg3Mzg2MTg2NQ== }
+  - { name: 字节跳动Seed,      fakeid: MzkzMDY5MzYxNg== }
+  - { name: 火山引擎,          fakeid: MzI0NzU1NzI5NQ==, alias: volcengine }
+  - { name: 腾讯混元,          fakeid: MzkwODU2OTQyNQ== }
+  - { name: 百度文心,          fakeid: MzI5NzUyMzM1Mg== }
+  - { name: 讯飞开放平台,       fakeid: MjM5NDE3OTM5MA== }
+  - { name: DeepSeek,        fakeid: Mzk0OTYwNzc3NQ== }
+  - { name: 昆仑万维集团,       fakeid: MzI1MzE1NDc3Mg== }
+  - { name: 智源研究院,        fakeid: MzI2MDcxMzQzOA== }
   - { name: 商汤科技SenseTime, fakeid: MzIwNTcyNzYwMA== }
   # ── 媒体号 ──────────────────────────────
-  - { name: 量子位,          fakeid: MzIzNjc1NzUzMw== }
+  - { name: 量子位,           fakeid: MzIzNjc1NzUzMw== }
   - 机器之心

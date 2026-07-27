@@ -475,3 +475,55 @@ class TestAccountsAcceptFakeid:
         )
         MpBackend().fetch(ChannelAccount(name="量子位"), 5)
         assert seen["fakeid"] == "SEARCHED"
+
+    def test_alias_beats_nickname_in_search(self):
+        """微信号全平台唯一且不可改，昵称既会改也会重名。
+
+        拿微信号搜时不能被某个昵称更像的结果抢先——搜 `minimax-platform`
+        返回的第一条是「MiniMax 稀宇科技」（alias 是 minimax-openplatform），
+        那是另一个号。
+        """
+        from sourcepilot.channels.wechat.mp import Credentials, WechatClient
+
+        client = WechatClient(Credentials("t", "c"))
+        client._get = lambda url, params: {
+            "list": [
+                {"nickname": "MiniMax 稀宇科技", "alias": "minimax-openplatform", "fakeid": "A"},
+                {"nickname": "MiniMax开放平台", "alias": "minimax-platform", "fakeid": "B"},
+            ]
+        }
+        assert client.search_account("minimax-platform")["fakeid"] == "B"
+
+    def test_nickname_still_matches_when_no_alias_hit(self):
+        from sourcepilot.channels.wechat.mp import Credentials, WechatClient
+
+        client = WechatClient(Credentials("t", "c"))
+        client._get = lambda url, params: {
+            "list": [
+                {"nickname": "别的号", "alias": "other", "fakeid": "A"},
+                {"nickname": "量子位", "alias": "QbitAI", "fakeid": "B"},
+            ]
+        }
+        assert client.search_account("量子位")["fakeid"] == "B"
+
+    def test_alias_is_recorded_but_never_sent(self, monkeypatch):
+        """alias 是给人看的身份凭据，不参与请求——请求只认 fakeid。"""
+        from sourcepilot.channels.wechat.mp import Credentials, MpBackend, WechatClient
+        from sourcepilot.sources.config import ChannelAccount
+
+        monkeypatch.setattr(
+            Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c"))
+        )
+        monkeypatch.setattr(
+            WechatClient, "search_account",
+            lambda self, kw: pytest.fail("有 fakeid 时不该搜索"),
+        )
+        seen = {}
+        monkeypatch.setattr(
+            WechatClient, "list_articles",
+            lambda self, fakeid, count=20: seen.setdefault("fakeid", fakeid) and [],
+        )
+        MpBackend().fetch(
+            ChannelAccount(name="火山引擎", fakeid="FID", alias="volcengine"), 5
+        )
+        assert seen["fakeid"] == "FID"

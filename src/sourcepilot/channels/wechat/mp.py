@@ -110,14 +110,24 @@ class WechatClient:
         return payload
 
     def search_account(self, keyword: str) -> dict[str, Any] | None:
-        """按名称搜公众号，拿它的 fakeid。fakeid 才是拉文章列表的钥匙。"""
+        """搜公众号，拿它的 fakeid。fakeid 才是拉文章列表的钥匙。
+
+        匹配优先级是有讲究的：**微信号（alias）> 昵称 > 第一条结果**。
+        微信号是全平台唯一且不可改的，昵称既会改也会重名——搜「智谱AI」
+        命中过一个 2022 年就停更的同名号。所以拿微信号搜时要让它精确命中，
+        而不是被某个昵称更像的结果抢先。
+        """
         payload = self._get(
             SEARCH_BIZ, {"action": "search_biz", "begin": 0, "count": 5, "query": keyword}
         )
-        for item in payload.get("list") or []:
+        candidates = payload.get("list") or []
+        for item in candidates:
+            if item.get("alias") == keyword:
+                return item
+        for item in candidates:
             if item.get("nickname") == keyword:
                 return item
-        return (payload.get("list") or [None])[0]
+        return candidates[0] if candidates else None
 
     def list_articles(self, fakeid: str, count: int = 20) -> list[dict[str, Any]]:
         """拉某个公众号的文章列表。
