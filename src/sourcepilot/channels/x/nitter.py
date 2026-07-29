@@ -65,7 +65,11 @@ def _entry_to_item(entry, handle: str, now: datetime) -> Item | None:
         id=f"x:{tweet_id}",
         source=Source(type=SourceType.X, name="X / Twitter", platform="x"),
         title=text[:80],
-        summary=text if len(text) > 80 else None,
+        # summary 恒为完整正文，**即使短于 title 的截断长度**。
+        # title 是 80 字截断版（契约要求 title 非空，而推文没有标题），
+        # 让 summary 只在「超过 80 字」时才有值的话，下游取正文就得写
+        # `summary or title`——一个字段的语义不该随长度变化。
+        summary=text,
         url=f"https://x.com/{author}/status/{tweet_id}",
         author=author,
         published_at=published,

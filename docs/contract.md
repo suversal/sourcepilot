@@ -120,7 +120,7 @@ tool schema 直接从本契约的 params 模型生成，所以 REST 与 MCP 的�
 | `source.name` | 是 | 人类可读源名，如 `"X / Twitter"` `"微博热搜"` |
 | `source.platform` | 否 | 子平台标识，热榜专用：`weibo` `zhihu` `douyin` `bilibili` … |
 | `title` | 是 | 非空。无标题的源（如纯图推文）取正文首 80 字符 |
-| `summary` | 否 | **客观摘要，不带观点**。抽取式，不做生成式改写 |
+| `summary` | 否 | **客观摘要，不带观点**。抽取式，不做生成式改写。**X 源恒为推文完整正文**——`title` 是 80 字截断版（契约要求 title 非空而推文没有标题），取正文一律用 `summary` |
 | `url` | 是 | 第三方原文链接，必须 http(s) |
 | `author` | 否 | 作者标识（X 用 handle，不带 @） |
 | `published_at` | 否 | 原文发布时间，ISO8601 UTC。**取不到就是 `null`，绝不回填** |

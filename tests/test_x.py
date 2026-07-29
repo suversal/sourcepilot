@@ -634,3 +634,46 @@ class TestAccountsAreCoercedToHandles:
         )
         collect_x(self._config([{"name": "OpenAI"}, "AnthropicAI"]))
         assert seen == ["OpenAI", "AnthropicAI"], "两种写法都该拿到裸 handle"
+
+
+class TestSummaryIsAlwaysTheFullText:
+    """`summary` 恒为完整正文，即使短于 title 的截断长度。
+
+    title 是 80 字截断版（契约要求 title 非空，而推文没有标题）。让 summary
+    只在「超过 80 字」时才有值的话，下游取正文就得写 `summary or title`
+    ——一个字段的语义不该随内容长度变化。
+    """
+
+    def _result(self, text):
+        return {
+            "rest_id": "1",
+            "core": {"user_results": {"result": {"core": {"screen_name": "a"}}}},
+            "legacy": {"id_str": "1", "full_text": text},
+        }
+
+    def test_short_tweet_still_has_summary(self):
+        from sourcepilot.channels.x.graphql import tweet_result_to_item
+
+        item = tweet_result_to_item(self._result("很短的一条"), NOW)
+        assert item.summary == "很短的一条", "短推文的正文不该只能从 title 拿"
+
+    def test_long_tweet_summary_is_not_truncated(self):
+        from sourcepilot.channels.x.graphql import tweet_result_to_item
+
+        long = "长" * 200
+        item = tweet_result_to_item(self._result(long), NOW)
+        assert item.summary == long
+        assert len(item.title) == 80, "title 仍是截断版"
+
+    def test_all_x_backends_agree(self):
+        """三个后端各自构造 Item，行为得一致——否则同一条推文的形状取决于
+        它是从哪个后端来的。"""
+        import inspect
+
+        from sourcepilot.channels.x import fxtwitter, graphql, nitter
+
+        for module in (fxtwitter, graphql, nitter):
+            source = inspect.getsource(module)
+            assert "summary=text if len(text)" not in source, (
+                f"{module.__name__} 还在用按长度决定 summary 的老写法"
+            )
