@@ -28,6 +28,7 @@ from .accounts import Account, AccountPool
 from .fxtwitter import FxTwitterBackend
 from .graphql import GraphQLBackend
 from .nitter import NitterBackend
+from .tweet import TweetRecord
 
 log = logging.getLogger("sourcepilot.channels.x")
 
@@ -86,7 +87,10 @@ class XRouter:
         handle = handle.lstrip("@")
 
         def via_nitter(backend):
-            return backend.fetch_timeline(handle, limit), None
+            # Nitter 走 RSS，拿不到互动数与引用链，所以给不出 TweetRecord。
+            # 空列表在这里是**诚实的**：宁可推文表少一条，也不写一条互动数
+            # 全为 0 的假记录——那会让下游以为这条推文没人理。
+            return backend.fetch_timeline(handle, limit), [], None
 
         def via_graphql(backend):
             user_id = backend.user_id(handle)
@@ -119,6 +123,35 @@ class XRouter:
         )
 
 
+class _TweetSink:
+    """推文全貌的落库出口。
+
+    `collect_x` 是 channel 入口，签名固定为「配置进、Item 列表出」，拿不到
+    Store。和 COOLDOWNS 同一个模式：服务启动时绑定一次，没绑定就静默丢弃
+    ——**丢的只是推文表这份附加视图，Item 照常入库**，所以测试和一次性脚本
+    不绑定也能正常跑。
+    """
+
+    def __init__(self) -> None:
+        self._store = None
+
+    def bind(self, store) -> None:
+        self._store = store
+
+    def write(self, records) -> int:
+        if self._store is None or not records:
+            return 0
+        try:
+            return self._store.upsert_tweets(records)
+        except Exception:
+            # 推文表写失败不该让整轮采集失败——Item 已经落库了，那是主线。
+            log.warning("推文全貌落库失败，本轮跳过", exc_info=True)
+            return 0
+
+
+TWEET_SINK = _TweetSink()
+
+
 def collect_x(config: SourceConfig) -> list[Item]:
     """定时采集入口：把配置里关注的账号的时间线抓进库，供缓存兜底用。
 
@@ -130,20 +163,25 @@ def collect_x(config: SourceConfig) -> list[Item]:
 
     router = XRouter(nitter_instances=config.nitter_instances or None)
     items: list[Item] = []
+    tweet_records: list[TweetRecord] = []
     for handle in handles:
         try:
-            fetched, _ = router.timeline(handle, config.per_account_limit)
+            fetched, records, _ = router.timeline(handle, config.per_account_limit)
             items.extend(fetched)
+            tweet_records.extend(records)
         except SourcePilotError as exc:
             # 单个账号取不到不该拖垮整批
             log.warning("X 取 @%s 时间线失败：%s", handle, exc.code.value)
             continue
+
+    TWEET_SINK.write(tweet_records)
     return items
 
 
 register_channel("x", collect_x)
 
 __all__ = [
+    "TWEET_SINK",
     "Account",
     "AccountPool",
     "FxTwitterBackend",

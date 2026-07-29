@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.5.0
+# SourcePilot · 工具契约 v1.6.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.5.0",
+    "contract_version": "1.6.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -424,6 +424,36 @@ Item 出参里**——消费方不需要知道，它看到的就该是干净的�
 
 一条推文若既被搜索捞到、又在订阅账号的时间线里出现，按 `collected` 计
 （单向升级，不可反向降级）。
+
+---
+
+## 5.4 推文全貌 `x_tweets`（v1.6.0 新增）
+
+`GET /api/v1/x/tweets` 返回推文的**原貌**，与 `/items?source=x` 是同一批推文的
+两个视图，不是主从关系：
+
+| | `/items?source=x` | `/x/tweets` |
+|---|---|---|
+| 形状 | 跨源统一的 Item | 推文特有字段 |
+| 用途 | 信息流、跨源检索 | 渲染推文卡片 |
+| 互动数 | 只有归一化的 `score` | likes / retweets / replies / quotes / bookmarks / views |
+| 外链 | 正文里是 `t.co` 短链 | `external_urls` 已展开 |
+| 引用推文 | 无 | `quoted_handle` + `quoted_text` |
+| 线程 | 无 | `conversation_id` |
+
+**为什么不合并进 Item**：互动数、引用链、线程在别的信源里没有对应概念。塞进
+`Item.raw` 的话消费方不能依赖它（§2 声明 raw 结构不稳定），而下游要做展示
+就需要稳定形状。
+
+**外链已展开，不要再去解析 `t.co`**。X 的响应里 `entities.urls[].expanded_url`
+就是真实地址，平台直接存下来。下游自己去请求短链既慢，又会在对方的点击统计里
+留下痕迹。`external_urls` 已排除指回 x.com / twitter.com 的自身链接。
+
+**Nitter 抓来的推文不进这张表**。它走 RSS，拿不到互动数与引用链——写一条
+互动数全为 0 的记录会让下游以为「这条推文没人理」，那比缺一条更糟。
+
+这张表**不分 `collected` / `searched`**（对比 §5.3）：它记的是「这条推文长什么样」，
+谁触发的抓取不改变这个事实。内容边界由 `/items` 那边守。
 
 ---
 

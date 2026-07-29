@@ -50,6 +50,7 @@ from .config import (
     SIGNED_OPERATIONS,
     USER_FEATURES,
 )
+from .tweet import TweetRecord, from_graphql
 
 log = logging.getLogger("sourcepilot.channels.x")
 
@@ -155,15 +156,32 @@ def tweet_result_to_item(result: dict[str, Any], now: datetime) -> Item | None:
     )
 
 
-def walk_timeline(payload: dict[str, Any], now: datetime) -> tuple[list[Item], str | None]:
-    """遍历 timeline 指令，抽出推文与下一页游标。
+def walk_timeline(
+    payload: dict[str, Any], now: datetime
+) -> tuple[list[Item], list[TweetRecord], str | None]:
+    """遍历 timeline 指令，抽出推文、推文全貌与下一页游标。
+
+    同时产出两种形状是刻意的：Item 进信息流参与跨源检索，TweetRecord 保留
+    推文原貌（互动数、引用链、展开外链）供需要它的消费方使用。两者从**同一份
+    响应**解析，不会出现「信息流里有、推文表里没有」的偏差。
 
     X 把结果放在 instructions[].entries[] 里，条目类型混杂（推文、游标、模块），
     所以按 entryId 前缀分派，遇到不认识的类型就跳过而不是报错——
     X 随时会加新类型，为此整条崩掉不值得。
     """
     items: list[Item] = []
+    records: list[TweetRecord] = []
     cursor: str | None = None
+
+    def take(result: dict[str, Any]) -> None:
+        """一份响应同时产出两种形状，保证它们不会各自解析出不同的集合。"""
+        parsed = tweet_result_to_item(result, now)
+        if parsed is None:
+            return
+        items.append(parsed)
+        record = from_graphql(result, now, parsed.published_at)
+        if record is not None:
+            records.append(record)
 
     def visit_entry(entry: dict[str, Any]) -> None:
         nonlocal cursor
@@ -178,9 +196,7 @@ def walk_timeline(payload: dict[str, Any], now: datetime) -> tuple[list[Item], s
         item_content = content.get("itemContent") or {}
         result = ((item_content.get("tweet_results") or {}).get("result")) or {}
         if result:
-            parsed = tweet_result_to_item(result, now)
-            if parsed is not None:
-                items.append(parsed)
+            take(result)
             return
 
         # 模块（会话串等）里还有一层
@@ -188,9 +204,7 @@ def walk_timeline(payload: dict[str, Any], now: datetime) -> tuple[list[Item], s
             sub_content = (sub.get("item") or {}).get("itemContent") or {}
             sub_result = ((sub_content.get("tweet_results") or {}).get("result")) or {}
             if sub_result:
-                parsed = tweet_result_to_item(sub_result, now)
-                if parsed is not None:
-                    items.append(parsed)
+                take(sub_result)
 
     data = payload.get("data") or {}
     timeline = (
@@ -206,7 +220,7 @@ def walk_timeline(payload: dict[str, Any], now: datetime) -> tuple[list[Item], s
         if instruction.get("entry"):
             visit_entry(instruction["entry"])
 
-    return items, cursor
+    return items, records, cursor
 
 
 class GraphQLBackend:

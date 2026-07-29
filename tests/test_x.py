@@ -274,21 +274,21 @@ class TestGraphQLParsing:
             "entryId": "cursor-bottom-1",
             "content": {"cursorType": "Bottom", "value": "NEXT"},
         }
-        items, cursor = walk_timeline(self._payload([self._entry(), cursor_entry]), NOW)
+        items, _records, cursor = walk_timeline(self._payload([self._entry(), cursor_entry]), NOW)
         assert [i.id for i in items] == ["x:555"]
         assert cursor == "NEXT"
 
     def test_unknown_entry_types_are_skipped_not_fatal(self):
         """X 随时会加新条目类型，为此整条崩掉不值得。"""
         weird = {"entryId": "who-knows-1", "content": {"somethingNew": {}}}
-        items, _ = walk_timeline(self._payload([weird, self._entry()]), NOW)
+        items, _records, _ = walk_timeline(self._payload([weird, self._entry()]), NOW)
         assert len(items) == 1
 
     def test_long_tweet_uses_note_text_not_truncated_full_text(self):
         entry = self._entry(text="截断的正文…")
         result = entry["content"]["itemContent"]["tweet_results"]["result"]
         result["note_tweet"] = {"note_tweet_results": {"result": {"text": "完整长推正文" * 20}}}
-        items, _ = walk_timeline(self._payload([entry]), NOW)
+        items, _records, _ = walk_timeline(self._payload([entry]), NOW)
         assert "截断" not in (items[0].summary or "")
 
     def test_no_accounts_means_unavailable(self):
@@ -317,7 +317,7 @@ class TestRouter:
             "user_id",
             lambda self, h: pytest.fail("Nitter 可用时不该动用账号"),
         )
-        items, _ = router.timeline("OpenAI", 5)
+        items, _records, _ = router.timeline("OpenAI", 5)
         assert items == ["来自 nitter"]
 
 
@@ -571,7 +571,7 @@ class TestSearchResultsDoNotPolluteTheFeed:
 
         class FakeRouter:
             def search(self, q, limit, cursor=None):
-                return items, None
+                return items, [], None
 
         return XSearchService(store, router=FakeRouter())
 

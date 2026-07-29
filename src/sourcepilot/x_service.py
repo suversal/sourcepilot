@@ -94,7 +94,7 @@ class XSearchService:
             return self._cache_envelope(rows, params.limit, started, stale=False)
 
         try:
-            items, cursor = self.router.search(params.q, params.limit, params.cursor)
+            items, records, cursor = self.router.search(params.q, params.limit, params.cursor)
         except SourcePilotError as exc:
             if exc.code not in DEGRADABLE_TO_CACHE:
                 return Envelope[ItemsPayload].failure(exc.code, exc.message)
@@ -113,6 +113,9 @@ class XSearchService:
         # 毫不相干的推文，不能让它们混进 /items 和 /feed.xml 推给所有下游。
         if items:
             self.store.upsert_items(items, origin="searched")
+            # 推文全貌不分 collected/searched——它不是信息流，是「这条推文长什么样」，
+            # 谁触发的抓取不影响这个事实。
+            self.store.upsert_tweets(records)
 
         meta = Meta(
             mode=Mode.LIVE,
@@ -167,7 +170,7 @@ class XTimelineService:
             return envelope(rows, stale=False, mode=Mode.CACHE)
 
         try:
-            items, cursor = self.router.timeline(handle, params.limit, params.cursor)
+            items, records, cursor = self.router.timeline(handle, params.limit, params.cursor)
         except SourcePilotError as exc:
             if exc.code not in DEGRADABLE_TO_CACHE:
                 return Envelope[ItemsPayload].failure(exc.code, exc.message)
@@ -180,6 +183,9 @@ class XTimelineService:
         # 同上：handle 也是调用方给的，任意账号的时间线不等于我们的订阅内容。
         if items:
             self.store.upsert_items(items, origin="searched")
+            # 推文全貌不分 collected/searched——它不是信息流，是「这条推文长什么样」，
+            # 谁触发的抓取不影响这个事实。
+            self.store.upsert_tweets(records)
 
         return Envelope[ItemsPayload].success(
             ItemsPayload(items=items),

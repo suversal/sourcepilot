@@ -90,5 +90,5 @@ accounts:
   - { name: 智源研究院,        fakeid: MzI2MDcxMzQzOA== }
   - { name: 商汤科技SenseTime, fakeid: MzIwNTcyNzYwMA== }
   # ── 媒体号 ──────────────────────────────
-  - { name: 量子位,           fakeid: MzIzNjc1NzUzMw== }
-  - 机器之心
+  - { name: 量子位,           fakeid: MzIzNjc1NzUzMw==, alias: QbitAI }
+  - { name: 机器之心,          fakeid: MzA3MzI4MjgzMw==, alias: almosthuman2014 }

@@ -58,6 +58,49 @@ CREATE INDEX IF NOT EXISTS idx_items_discovered ON items(discovered_at DESC, id 
 CREATE INDEX IF NOT EXISTS idx_items_platform   ON items(platform, score DESC);
 CREATE INDEX IF NOT EXISTS idx_items_type       ON items(source_type, discovered_at DESC);
 
+-- 推文全貌。与 items 是**同一条推文的两个视图**，不是主从关系：
+-- items 进信息流参与跨源检索，这张表供需要推文原貌的消费方（推文卡片）使用。
+-- 之所以不合并进 items：互动数、引用链、线程、展开外链在别的信源里没有对应
+-- 概念，塞进 items.raw 的话消费方就不能依赖它了（契约声明 raw 结构不稳定）。
+CREATE TABLE IF NOT EXISTS x_tweets (
+    tweet_id           TEXT PRIMARY KEY,
+    conversation_id    TEXT,
+    author_handle      TEXT NOT NULL,
+    author_name        TEXT,
+    author_id          TEXT,
+    author_avatar      TEXT,
+    author_verified    INTEGER NOT NULL DEFAULT 0,
+    author_followers   INTEGER,
+    text               TEXT NOT NULL,
+    lang               TEXT,
+    created_at         TEXT,
+    likes              INTEGER,
+    retweets           INTEGER,
+    replies            INTEGER,
+    quotes             INTEGER,
+    bookmarks          INTEGER,
+    views              INTEGER,
+    is_reply           INTEGER NOT NULL DEFAULT 0,
+    reply_to_handle    TEXT,
+    reply_to_tweet_id  TEXT,
+    is_quote           INTEGER NOT NULL DEFAULT 0,
+    quoted_tweet_id    TEXT,
+    quoted_handle      TEXT,
+    quoted_text        TEXT,
+    -- 以下四个是 JSON 数组。urls 里的 expanded_url 是**展开后的真实地址**，
+    -- 正文里那些 t.co 短链解析不动也不该去解析（慢，且会在对方统计里留点击）。
+    urls               TEXT NOT NULL DEFAULT '[]',
+    hashtags           TEXT NOT NULL DEFAULT '[]',
+    mentions           TEXT NOT NULL DEFAULT '[]',
+    media              TEXT NOT NULL DEFAULT '[]',
+    possibly_sensitive INTEGER NOT NULL DEFAULT 0,
+    source_client      TEXT,
+    fetched_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tweets_created ON x_tweets(created_at DESC, tweet_id DESC);
+CREATE INDEX IF NOT EXISTS idx_tweets_author  ON x_tweets(author_handle, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tweets_convo   ON x_tweets(conversation_id);
+
 CREATE TABLE IF NOT EXISTS cooldowns (
     key         TEXT PRIMARY KEY,
     until       TEXT NOT NULL,
@@ -191,6 +234,87 @@ class Store:
                 rows,
             )
         return len(rows)
+
+    #: x_tweets 的列顺序，插入与读取共用一份，避免两处各写各的而错位。
+    TWEET_COLUMNS = (
+        "tweet_id", "conversation_id", "author_handle", "author_name", "author_id",
+        "author_avatar", "author_verified", "author_followers", "text", "lang",
+        "created_at", "likes", "retweets", "replies", "quotes", "bookmarks", "views",
+        "is_reply", "reply_to_handle", "reply_to_tweet_id", "is_quote",
+        "quoted_tweet_id", "quoted_handle", "quoted_text", "urls", "hashtags",
+        "mentions", "media", "possibly_sensitive", "source_client", "fetched_at",
+    )
+
+    def upsert_tweets(self, records: Iterable[Any]) -> int:
+        """写入推文全貌。互动数会随时间涨，所以重复采集时**覆盖**而不是跳过。"""
+        rows = []
+        for r in records:
+            rows.append((
+                r.tweet_id, r.conversation_id, r.author_handle, r.author_name, r.author_id,
+                r.author_avatar, int(r.author_verified), r.author_followers, r.text, r.lang,
+                _iso(r.created_at) if r.created_at else None,
+                r.likes, r.retweets, r.replies, r.quotes, r.bookmarks, r.views,
+                int(r.is_reply), r.reply_to_handle, r.reply_to_tweet_id, int(r.is_quote),
+                r.quoted_tweet_id, r.quoted_handle, r.quoted_text,
+                json.dumps(r.urls, ensure_ascii=False),
+                json.dumps(r.hashtags, ensure_ascii=False),
+                json.dumps(r.mentions, ensure_ascii=False),
+                json.dumps(r.media, ensure_ascii=False),
+                int(r.possibly_sensitive), r.source_client, _iso(r.fetched_at),
+            ))
+        if not rows:
+            return 0
+        placeholders = ",".join("?" * len(self.TWEET_COLUMNS))
+        updates = ",".join(
+            f"{c}=excluded.{c}" for c in self.TWEET_COLUMNS if c != "tweet_id"
+        )
+        with self._conn() as conn:
+            conn.executemany(
+                f"INSERT INTO x_tweets VALUES ({placeholders}) "
+                f"ON CONFLICT(tweet_id) DO UPDATE SET {updates}",
+                rows,
+            )
+        return len(rows)
+
+    def query_tweets(
+        self,
+        *,
+        q: str | None = None,
+        handle: str | None = None,
+        conversation_id: str | None = None,
+        has_links: bool = False,
+        since: datetime | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """读推文全貌。JSON 列在这里解开，消费方拿到的就是可直接用的结构。"""
+        where, args = [], []
+        if q:
+            where.append("text LIKE ?")
+            args.append(f"%{q}%")
+        if handle:
+            where.append("author_handle = ? COLLATE NOCASE")
+            args.append(handle)
+        if conversation_id:
+            where.append("conversation_id = ?")
+            args.append(conversation_id)
+        if has_links:
+            # 空数组是 '[]'，长度 2；有内容就更长。
+            where.append("length(urls) > 2")
+        if since is not None:
+            where.append("created_at > ?")
+            args.append(_iso(since))
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        args.append(limit)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM x_tweets{clause} ORDER BY created_at DESC, tweet_id DESC LIMIT ?",
+                args,
+            ).fetchall()
+        return [_row_to_tweet(r) for r in rows]
+
+    def count_tweets(self) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM x_tweets").fetchone()[0]
 
     def query_items(
         self,
@@ -409,6 +533,24 @@ def _row_to_item(row: sqlite3.Row) -> Item:
 
 # ---------- 游标 ----------
 # opaque：编码方式随时可能变，消费方不得解析（契约 §4）。
+
+
+def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    for key in ("urls", "hashtags", "mentions", "media"):
+        d[key] = json.loads(d[key] or "[]")
+    for key in ("author_verified", "is_reply", "is_quote", "possibly_sensitive"):
+        d[key] = bool(d[key])
+    # 展开后的站外链接，下游抓原文直接用这个，不必再解析 t.co。
+    d["external_urls"] = [
+        u["expanded_url"]
+        for u in d["urls"]
+        if u.get("expanded_url")
+        and "//x.com/" not in u["expanded_url"]
+        and "//twitter.com/" not in u["expanded_url"]
+    ]
+    d["url"] = f"https://x.com/{d['author_handle']}/status/{d['tweet_id']}"
+    return d
 
 
 def encode_cursor(item: Item) -> str:

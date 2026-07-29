@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import FastAPI, Query, Request
@@ -18,6 +20,7 @@ from . import __version__
 from .article import ArticleService
 from .canary import Canary
 from .channels.cooldown import COOLDOWNS
+from .channels.x import TWEET_SINK
 from .collector import Collector, Scheduler
 from .contracts import (
     API_PREFIX,
@@ -31,6 +34,8 @@ from .contracts import (
     GetWechatFeedParams,
     GetXTimelineParams,
     ItemsPayload,
+    Meta,
+    Mode,
     ReadArticleParams,
     SearchXParams,
     SourcePilotError,
@@ -93,6 +98,8 @@ def create_app(
         # 把上次的冷却读回来。不这样的话重启一次冷却就清零，真被封号时
         # 重启一下就又去捅了——那是账号安全问题。
         COOLDOWNS.bind(store)
+        # 推文全貌的落库出口。不绑定的话 X 采集照常跑，只是不写推文表。
+        TWEET_SINK.bind(store)
         # 没有后台采集，只有被 /hotlist 打到的源会更新，厂商发布那类永远是空的。
         if scheduler:
             background.start()
@@ -227,6 +234,47 @@ def create_app(
         if not env.ok and env.error is not None:
             return _envelope_response(env, HTTP_STATUS[env.error.code])  # type: ignore[return-value]
         return env
+
+    @app.get(f"{API_PREFIX}/x/tweets", tags=["tools"], summary="get_x_tweets")
+    async def get_x_tweets(
+        q: Annotated[str | None, Query(description="正文子串匹配")] = None,
+        handle: Annotated[str | None, Query(description="作者 handle，不带 @")] = None,
+        conversation_id: Annotated[str | None, Query(description="线程 id，取整串对话")] = None,
+        has_links: Annotated[bool, Query(description="只要正文带站外链接的")] = False,
+        since: Annotated[str | None, Query(description="ISO8601，只返回此后发布的")] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        """推文全貌：互动数、引用链、线程、**已展开的外链**。
+
+        与 `/items?source=x` 的区别是形状而不是内容——那边是跨源统一的 Item，
+        这边保留推文原样，给需要渲染推文卡片的消费方。正文里的 `t.co` 短链在
+        `external_urls` 里已经是展开后的真实地址，不必也不该再去解析短链。
+
+        只读缓存：推文由定时采集与现查落库，这个端点不触发抓取。
+        """
+        parsed_since = None
+        if since:
+            try:
+                parsed_since = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError:
+                return _envelope_response(
+                    Envelope.failure(ErrorCode.BAD_REQUEST, f"since 不是合法 ISO8601：{since}"),
+                    400,
+                )
+        started = time.perf_counter()
+        rows = store.query_tweets(
+            q=q, handle=handle, conversation_id=conversation_id,
+            has_links=has_links, since=parsed_since, limit=limit,
+        )
+        return Envelope.success(
+            {"tweets": rows},
+            Meta(
+                mode=Mode.CACHE,
+                stale=False,
+                collected_at=max((r["fetched_at"] for r in rows), default=None),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            ),
+        )
 
     @app.get(f"{API_PREFIX}/wechat/feed", tags=["tools"], summary="get_wechat_feed")
     async def get_wechat_feed(
