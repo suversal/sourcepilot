@@ -472,6 +472,41 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 `has_article` 为 true 但 `article_markdown` 为空 = 补取还没跑到（长文每篇
 一次请求，单轮有上限，剩下的下轮补）。
 
+### 展示分流：`content_kind` 与 `display_*`
+
+推文不是一种内容，是几种。一篇 3 万阅读的长文和一句 59 字的吐槽塞进同一个
+列表位，两边都不对。读取时按**确定性规则**给出形态（不涉及语义理解，那是
+下游的事，同 `categories` 的原则），优先级从高到低：
+
+| `content_kind` | 判据 | 下游怎么处理 |
+|---|---|---|
+| `article` | 挂了长文 | 走文章流程，**正文已在 `article_markdown`，不必再拉** |
+| `longform` | 正文 > 280 字 | 走文章流程，推文本身就是内容 |
+| `link` | 带站外链接 | 真内容在 `external_urls`，按普通文章抓 |
+| `quote` | 引用他人 | 卡片，嵌套展示 `quoted_handle` + `quoted_text` |
+| `brief` | 其余 | 卡片，适合聚合成「N 条在讨论 X」 |
+
+配套两个派生字段，省掉下游在展示层写分支：
+
+- `display_title` — 长文取 `article_title`，其余取首行
+- `display_text` — 长文取 `article_markdown`，其余取 `text`
+
+**为什么 `display_text` 对长文必须换成正文**：长文推文的 `text` 只有一句
+入口语（「我整理成一篇长文」），按它渲染会把一条 3 万阅读的内容显示成一句废话。
+
+`link` 那类**不在这里解析外链正文**——那要额外出网，是 `read_article` 的活。
+
+### 线程 `GET /api/v1/x/thread`
+
+按 `conversation_id` 取一整串，**时间正序**，附带拼好的 `combined_text`。
+
+`author_only`（默认 true）滤掉两种东西，第二种容易漏：
+
+1. 别人的回复——同一线程下混着所有人的评论；
+2. **作者回复别人的那些**。作者在自己线程下回复网友提问（「@某某 机制啊」），
+   作者对、`conversation_id` 也对，但那是评论区互动而不是他要讲的内容。
+   判据是 `reply_to_handle` 指向别人；指向他自己才是线程的续写。
+
 这张表**不分 `collected` / `searched`**（对比 §5.3）：它记的是「这条推文长什么样」，
 谁触发的抓取不改变这个事实。内容边界由 `/items` 那边守。
 

@@ -101,6 +101,57 @@ class TweetRecord:
         ]
 
 
+#: X 长推文的门槛。超过这个长度说明作者是在写内容，不是随口一句。
+#: 取 280 是因为那正是 X 免费账号的单条上限——能超过它的都是有意为之。
+LONGFORM_CHARS = 280
+
+
+def classify(row: dict[str, Any]) -> str:
+    """这条推文该按什么形态展示。
+
+    **推文不是一种内容，是几种**：一篇 3 万阅读的长文和一句 59 字的吐槽塞进
+    同一个列表位，两边都不对。下游按这个字段分流：`article` / `longform`
+    走文章流程（正文已在库里），其余走卡片。
+
+    判定是**确定性规则**，不涉及语义理解——那是下游的事（同 categories 的原则）。
+    优先级从高到低，一条推文可能同时满足多条，取最高的那个：
+
+      article  挂了长文，正文在 article_markdown
+      longform 推文本身够长，自己就是内容
+      link     带站外链接，真内容在链接里
+      quote    引用别人，上下文在被引那条
+      brief    一句话
+    """
+    if row.get("has_article"):
+        return "article"
+    if len(row.get("text") or "") > LONGFORM_CHARS:
+        return "longform"
+    if row.get("external_urls"):
+        return "link"
+    if row.get("is_quote"):
+        return "quote"
+    return "brief"
+
+
+def display_fields(row: dict[str, Any]) -> tuple[str, str]:
+    """展示用的标题与正文，省掉下游在展示层写分支。
+
+    长文的 `text` 只有一句入口语（「我整理成一篇长文」），真内容在
+    `article_markdown` 里——按 text 渲染会把一条 3 万阅读的内容显示成一句废话。
+
+    带外链的那类**不在这里解析外链正文**：那要额外出网，是 read_article 的活，
+    不该藏在一个取字段的函数里。下游拿 external_urls 自己去抓。
+    """
+    if row.get("has_article") and (row.get("article_markdown") or "").strip():
+        title = row.get("article_title") or (row.get("text") or "")[:60]
+        return title, row["article_markdown"]
+
+    text = row.get("text") or ""
+    # 没有标题的推文取首行；首行过长就截断，别把整段塞进标题。
+    first_line = text.strip().split("\n", 1)[0]
+    return (first_line[:60] or text[:60]), text
+
+
 def _media_entries(legacy: dict[str, Any]) -> list[dict[str, str]]:
     """媒体优先取 extended_entities——多图推文在 entities 里只出现第一张。"""
     entries = (legacy.get("extended_entities") or legacy.get("entities") or {}).get("media") or []

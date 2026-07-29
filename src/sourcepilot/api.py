@@ -242,6 +242,10 @@ def create_app(
         conversation_id: Annotated[str | None, Query(description="线程 id，取整串对话")] = None,
         has_links: Annotated[bool, Query(description="只要正文带站外链接的")] = False,
         has_article: Annotated[bool, Query(description="只要挂了长文（X Articles）的")] = False,
+        kind: Annotated[
+            str | None,
+            Query(description="按形态过滤：article|longform|link|quote|brief，逗号分隔"),
+        ] = None,
         since: Annotated[str | None, Query(description="ISO8601，只返回此后发布的")] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
@@ -268,14 +272,61 @@ def create_app(
         started = time.perf_counter()
         rows = store.query_tweets(
             q=q, handle=handle, conversation_id=conversation_id,
-            has_links=has_links, has_article=has_article, since=parsed_since, limit=limit,
+            has_links=has_links, has_article=has_article, since=parsed_since,
+            # content_kind 是读取时算的派生字段，SQL 里没有，所以在这一层过滤。
+            # 多取一些再筛，避免过滤后不够 limit。
+            limit=limit if not kind else limit * 5,
         )
+        if kind:
+            wanted = {k.strip() for k in kind.split(",") if k.strip()}
+            unknown = wanted - {"article", "longform", "link", "quote", "brief"}
+            if unknown:
+                return _envelope_response(
+                    Envelope.failure(
+                        ErrorCode.BAD_REQUEST,
+                        f"未知形态 {', '.join(sorted(unknown))}，"
+                        f"可用：article, longform, link, quote, brief",
+                    ),
+                    400,
+                )
+            rows = [r for r in rows if r["content_kind"] in wanted][:limit]
         return Envelope.success(
             {"tweets": rows},
             Meta(
                 mode=Mode.CACHE,
                 stale=False,
                 collected_at=max((r["fetched_at"] for r in rows), default=None),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            ),
+        )
+
+    @app.get(f"{API_PREFIX}/x/thread", tags=["tools"], summary="get_x_thread")
+    async def get_x_thread(
+        conversation_id: Annotated[str, Query(description="线程 id，来自推文的 conversation_id")],
+        author_only: Annotated[bool, Query(description="只要发起者本人的，滤掉他人回复")] = True,
+    ):
+        """一整串线程，按时间正序。
+
+        作者连发几条讲一件事时，拆成几个卡片会很碎——合起来才是一篇内容。
+        `author_only` 默认开着：同一线程下还有别人的回复，混进来「一篇内容」
+        就变成了评论区。
+        """
+        started = time.perf_counter()
+        tweets = store.query_thread(conversation_id, author_only=author_only)
+        if not tweets:
+            return _envelope_response(
+                Envelope.failure(ErrorCode.NOT_FOUND, f"线程 {conversation_id} 不在库里"), 404
+            )
+        return Envelope.success(
+            {
+                "tweets": tweets,
+                # 拼好的整串正文，下游不用自己 join。
+                "combined_text": "\n\n".join(t["display_text"] for t in tweets),
+            },
+            Meta(
+                mode=Mode.CACHE,
+                stale=False,
+                collected_at=max(t["fetched_at"] for t in tweets),
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
             ),
         )

@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .channels.x.tweet import classify as classify_tweet
+from .channels.x.tweet import display_fields as tweet_display_fields
 from .contracts import (
     BadRequest,
     Category,
@@ -355,6 +357,38 @@ class Store:
             ).fetchall()
         return [_row_to_tweet(r) for r in rows]
 
+    def query_thread(self, conversation_id: str, author_only: bool = True) -> list[dict[str, Any]]:
+        """取一整串线程，**按时间正序**。
+
+        作者连发五条讲一件事，拆成五个卡片会很碎——合起来才是一篇内容。
+
+        `author_only` 默认开着，它滤掉两种东西：
+
+        1. **别人的回复**——同一个 conversation_id 下混着所有人的评论。
+        2. **作者回复别人的那些**。这条容易漏：作者在自己线程下回复某个网友的
+           提问（「@某某 机制啊」），作者是他本人、conversation_id 也对，但那是
+           评论区互动而不是他要讲的内容。判据是 `reply_to_handle` 指向别人。
+
+        作者接着自己发（`reply_to_handle` 是他自己）才是线程的续写。
+        原作者取最早那条的作者——线程的第一条按定义就是发起者。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM x_tweets WHERE conversation_id = ? "
+                "ORDER BY created_at ASC, tweet_id ASC",
+                (conversation_id,),
+            ).fetchall()
+        tweets = [_row_to_tweet(r) for r in rows]
+        if author_only and tweets:
+            starter = tweets[0]["author_handle"]
+            tweets = [
+                t
+                for t in tweets
+                if t["author_handle"] == starter
+                and t["reply_to_handle"] in (None, "", starter)
+            ]
+        return tweets
+
     def count_tweets(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM x_tweets").fetchone()[0]
@@ -593,6 +627,9 @@ def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
         and "//twitter.com/" not in u["expanded_url"]
     ]
     d["url"] = f"https://x.com/{d['author_handle']}/status/{d['tweet_id']}"
+    # 派生字段：读取时算而不是存库。规则以后要调，存库的话历史数据会跟新规则不一致。
+    d["content_kind"] = classify_tweet(d)
+    d["display_title"], d["display_text"] = tweet_display_fields(d)
     return d
 
 

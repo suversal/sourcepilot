@@ -380,3 +380,127 @@ class TestArticleTextSurvivesRecollection:
         ])
         pending = store.query_tweets(missing_article_text=True, limit=10)
         assert [p["tweet_id"] for p in pending] == ["1"]
+
+
+class TestContentKind:
+    """推文不是一种内容，是几种。
+
+    一篇 3 万阅读的长文和一句 59 字的吐槽塞进同一个列表位，两边都不对。
+    判定是确定性规则，不涉及语义理解——那是下游的事。
+    """
+
+    def _row(self, **over):
+        base = {"text": "短推文", "has_article": False, "external_urls": [], "is_quote": False}
+        return {**base, **over}
+
+    def test_article_wins_over_everything(self):
+        from sourcepilot.channels.x.tweet import classify
+
+        # 长文推文常常同时带链接、又是引用——但它首先是长文
+        assert classify(self._row(
+            has_article=True, external_urls=["https://a"], is_quote=True)) == "article"
+
+    def test_longform_by_length(self):
+        from sourcepilot.channels.x.tweet import LONGFORM_CHARS, classify
+
+        assert classify(self._row(text="x" * (LONGFORM_CHARS + 1))) == "longform"
+        assert classify(self._row(text="x" * LONGFORM_CHARS)) == "brief"
+
+    def test_link_and_quote_and_brief(self):
+        from sourcepilot.channels.x.tweet import classify
+
+        assert classify(self._row(external_urls=["https://a"])) == "link"
+        assert classify(self._row(is_quote=True)) == "quote"
+        assert classify(self._row()) == "brief"
+
+
+class TestDisplayFields:
+    def test_article_shows_the_body_not_the_teaser(self):
+        """长文的 text 只是一句入口语，按它渲染会让 3 万阅读的内容显示成一句废话。"""
+        from sourcepilot.channels.x.tweet import display_fields
+
+        title, body = display_fields({
+            "text": "我整理成一篇长文，建议自查",
+            "has_article": True,
+            "article_title": "Giffgaff 大规模封号",
+            "article_markdown": "## 一、发生了什么\n\n正文……",
+        })
+        assert title == "Giffgaff 大规模封号"
+        assert body.startswith("## 一、发生了什么")
+
+    def test_empty_article_body_falls_back_to_text(self):
+        """has_article 但正文还没补到时，别给一个空白正文。"""
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, body = display_fields({
+            "text": "我整理成一篇长文", "has_article": True, "article_markdown": "  "
+        })
+        assert body == "我整理成一篇长文"
+
+    def test_title_takes_the_first_line_only(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        title, body = display_fields({"text": "第一行标题\n第二行正文", "has_article": False})
+        assert title == "第一行标题"
+        assert body == "第一行标题\n第二行正文"
+
+
+class TestThread:
+    def _add(self, store, tweet_id, author, reply_to=None, text="内容", minute=0):
+        from datetime import timedelta
+
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            tweet_id, author, text, NOW, created_at=NOW + timedelta(minutes=minute),
+            conversation_id="c1", is_reply=bool(reply_to), reply_to_handle=reply_to)])
+
+    def test_thread_is_chronological(self, store):
+        """作者连发几条讲一件事，拆成几个卡片会很碎。"""
+        self._add(store, "3", "alice", "alice", "第三条", 20)
+        self._add(store, "1", "alice", None, "第一条", 0)
+        self._add(store, "2", "alice", "alice", "第二条", 10)
+        assert [t["text"] for t in store.query_thread("c1")] == ["第一条", "第二条", "第三条"]
+
+    def test_others_replies_are_excluded(self, store):
+        self._add(store, "1", "alice", None, "原推", 0)
+        self._add(store, "2", "bob", "alice", "路人评论", 5)
+        assert [t["author_handle"] for t in store.query_thread("c1")] == ["alice"]
+
+    def test_author_replying_to_someone_else_is_excluded(self, store):
+        """作者在自己线程下回复网友提问——作者对、线程对，但那是评论区互动。"""
+        self._add(store, "1", "alice", None, "原推", 0)
+        self._add(store, "2", "alice", "alice", "接着说", 5)
+        self._add(store, "3", "alice", "路人甲", "@路人甲 是的", 10)
+        assert [t["text"] for t in store.query_thread("c1")] == ["原推", "接着说"]
+
+    def test_author_only_off_keeps_everything(self, store):
+        self._add(store, "1", "alice", None, "原推", 0)
+        self._add(store, "2", "bob", "alice", "路人评论", 5)
+        assert len(store.query_thread("c1", author_only=False)) == 2
+
+
+class TestKindFilterEndpoint:
+    @pytest.fixture
+    def client(self, store):
+        from fastapi.testclient import TestClient
+
+        from sourcepilot.api import create_app
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([
+            TweetRecord("1", "a", "短", NOW, created_at=NOW),
+            TweetRecord("2", "a", "带长文", NOW, created_at=NOW,
+                        has_article=True, article_markdown="# 正文", article_title="标题"),
+        ])
+        return TestClient(create_app(store=store, sources={}, scheduler=False))
+
+    def test_filter_by_kind(self, client):
+        r = client.get("/api/v1/x/tweets?kind=article")
+        (tweet,) = r.json()["data"]["tweets"]
+        assert tweet["content_kind"] == "article"
+
+    def test_unknown_kind_lists_the_valid_ones(self, client):
+        r = client.get("/api/v1/x/tweets?kind=文章")
+        assert r.status_code == 400
+        assert "article" in r.json()["error"]["message"]
