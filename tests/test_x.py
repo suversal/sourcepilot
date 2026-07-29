@@ -303,22 +303,41 @@ class TestRouter:
         with pytest.raises(Exception, match="没有可用后端"):
             router.search("test", 5)
 
-    def test_timeline_prefers_zero_auth_backend(self, monkeypatch):
-        """账号是稀缺且脆弱的资源，能不用就不用。"""
+    def test_timeline_prefers_graphql_for_complete_data(self, monkeypatch):
+        """时间线优先 GraphQL，因为只有它给得出推文全貌。
+
+        这个顺序被调过一次：原本 Nitter 优先（省账号配额），但 Nitter 走 RSS，
+        拿不到互动数、引用链、长文正文——加了 x_tweets 之后，订阅采集的推文
+        一条全貌都没有。当初的权衡没错，错在需求变了之后没重看它的前提。
+        """
         router = XRouter()
+        monkeypatch.setattr(GraphQLBackend, "available", lambda self: True)
+        monkeypatch.setattr(GraphQLBackend, "user_id", lambda self, h: "u1")
+        monkeypatch.setattr(
+            GraphQLBackend, "timeline", lambda self, uid, n, c=None: (["来自 graphql"], ["记录"], None)
+        )
+        monkeypatch.setattr(
+            NitterBackend, "fetch_timeline",
+            lambda self, h, n: pytest.fail("GraphQL 可用时不该降级到 Nitter"),
+        )
+        items, records, _ = router.timeline("OpenAI", 5)
+        assert items == ["来自 graphql"]
+        assert records == ["记录"], "全貌必须一并拿到"
+
+    def test_timeline_falls_back_to_nitter(self, monkeypatch):
+        """账号被限流或失效时，有内容总比没有强——只是那一轮拿不到全貌。"""
+        router = XRouter()
+        monkeypatch.setattr(GraphQLBackend, "available", lambda self: True)
+        monkeypatch.setattr(
+            GraphQLBackend, "user_id",
+            lambda self, h: (_ for _ in ()).throw(RateLimited("配额用尽")),
+        )
         monkeypatch.setattr(
             NitterBackend, "fetch_timeline", lambda self, h, n: ["来自 nitter"]
         )
-        monkeypatch.setattr(
-            GraphQLBackend, "available", lambda self: True
-        )
-        monkeypatch.setattr(
-            GraphQLBackend,
-            "user_id",
-            lambda self, h: pytest.fail("Nitter 可用时不该动用账号"),
-        )
-        items, _records, _ = router.timeline("OpenAI", 5)
+        items, records, _ = router.timeline("OpenAI", 5)
         assert items == ["来自 nitter"]
+        assert records == [], "Nitter 给不出全貌，空列表是诚实的"
 
 
 class TestSignatureRequirement:

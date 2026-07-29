@@ -83,7 +83,21 @@ class XRouter:
         )
 
     def timeline(self, handle: str, limit: int, cursor: str | None = None):
-        """时间线优先走零认证的 Nitter，省下账号配额和封号风险。"""
+        """时间线优先走 GraphQL，Nitter 作降级。
+
+        **这个顺序被调过一次，值得记下来为什么。**
+
+        原本是 Nitter 优先，理由是「账号是稀缺且脆弱的资源，能不动用就不动用」
+        ——那时只有 items 表，而 Nitter 的 RSS 给的 title/正文/时间/链接刚好
+        够填满它。后来加了 x_tweets（互动数、引用链、线程、长文正文），
+        **RSS 里根本没有这些字段**，于是订阅采集的推文一条全貌都没有。
+
+        当初的权衡没错，错在需求变了之后没回头看它的前提还成不成立。
+
+        配额上也确实付得起：订阅 2 个账号、每 15 分钟一轮 = 192 次/天，
+        远低于 UserTweets 的限流阈值。Nitter 留作降级——账号被限流或失效时，
+        有内容总比没有强，只是那一轮拿不到全貌。
+        """
         handle = handle.lstrip("@")
 
         def via_nitter(backend):
@@ -98,7 +112,7 @@ class XRouter:
                 raise NotFound(f"找不到用户 @{handle}")
             return backend.timeline(user_id, limit, cursor)
 
-        candidates = self._usable([self.nitter, self.graphql])
+        candidates = self._usable([self.graphql, self.nitter])
         if not candidates:
             raise AuthExpired("X 时间线没有可用后端")
 
