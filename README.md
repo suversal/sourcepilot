@@ -240,6 +240,23 @@ X 的三个后端按能力分工，不是简单一条链从头试到尾：
 
 时间线把零认证的 Nitter 排在前面是刻意的：**账号是稀缺且脆弱的资源，能不动用就不动用**。
 
+### X 长文（Articles）
+
+X 的长文正在成为一种主流的深度内容形式，但**搜索与时间线接口只给约 100 字预览**
+——对下游等于没拿到。平台会为带长文的推文单独再取一次全文。
+
+这条路不好找：正文藏在 `TweetResultByRestId` 的 `withArticleRichContentState`
+开关后面，而那个 fieldToggle 默认是关的。前端 bundle 里也挖不到（相关代码在
+按需加载的 chunk 里），最后是**从浏览器的实际网络请求里截获的**。
+
+正文格式是 Draft.js 的 `{blocks, entityMap}`，转成 Markdown 后保留二级标题、
+链接与配图。X 同时提供 `plain_text`，但那一版把标题和正文拍平、链接只剩锚文本，
+所以只作解析失败时的兜底。
+
+```bash
+curl "http://127.0.0.1:8420/api/v1/x/tweets?has_article=true"
+```
+
 ## 采集节流
 
 三层，各管各的：

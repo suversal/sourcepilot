@@ -42,7 +42,9 @@ from ...contracts import (
     UpstreamDown,
 )
 from .accounts import Account, AccountPool
+from .article import parse as parse_article
 from .config import (
+    ARTICLE_FIELD_TOGGLES,
     DEFAULT_FEATURES,
     GRAPHQL_BASE,
     OPERATIONS,
@@ -401,6 +403,32 @@ class GraphQLBackend:
             account, "UserTweets", variables, field_toggles={"withArticlePlainText": False}
         )
         return walk_timeline(payload, datetime.now(UTC))
+
+    def fetch_article(self, tweet_id: str) -> dict[str, Any] | None:
+        """取一条推文挂载的长文正文。
+
+        **必须单独请求**：搜索与时间线返回的 article 只有 preview_text，
+        正文要靠 ARTICLE_FIELD_TOGGLES 打开。没有长文的推文返回 None，
+        调用方据此跳过——所以调用前先看 `has_article`，别对每条推文都问一遍。
+        """
+        account = self.pool.acquire("TweetResultByRestId")
+        payload = self._request(
+            account,
+            "TweetResultByRestId",
+            {
+                "tweetId": tweet_id,
+                "includePromotedContent": True,
+                "withBirdwatchNotes": True,
+                "withVoice": True,
+                "withCommunity": True,
+            },
+            field_toggles=ARTICLE_FIELD_TOGGLES,
+        )
+        result = ((payload.get("data") or {}).get("tweetResult") or {}).get("result") or {}
+        if result.get("__typename") == "TweetWithVisibilityResults":
+            result = result.get("tweet") or {}
+        article = ((result.get("article") or {}).get("article_results") or {}).get("result")
+        return parse_article(article or {})
 
     def user_id(self, handle: str) -> str | None:
         account = self.pool.acquire("UserByScreenName")

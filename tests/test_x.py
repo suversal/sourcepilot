@@ -573,6 +573,9 @@ class TestSearchResultsDoNotPolluteTheFeed:
             def search(self, q, limit, cursor=None):
                 return items, [], None
 
+            def fill_articles(self, records, store=None, limit=10):
+                return 0
+
         return XSearchService(store, router=FakeRouter())
 
     def _tweet(self, n: int):
@@ -606,3 +609,28 @@ class TestSearchResultsDoNotPolluteTheFeed:
 
         self._service(store, [self._tweet(1)]).search(SearchXParams(q="Opus"))
         assert len(store.query_items(limit=10, include_searched=True)) == 1
+
+
+class TestAccountsAreCoercedToHandles:
+    """`accounts` 是 ChannelAccount（公众号那边为了 fakeid 才引入的）。
+
+    X 只认 handle 字符串，直接把对象传下去会在 `handle.lstrip("@")` 处炸掉
+    ——这个回归真实发生过，定时采集整个停了而信息流看起来一切正常。
+    """
+
+    def _config(self, accounts):
+        from sourcepilot.sources import SourceConfig
+
+        return SourceConfig(
+            name="x", display_name="X", type=SourceType.X, channel="x", accounts=accounts
+        )
+
+    def test_channel_account_objects_become_strings(self, monkeypatch):
+        from sourcepilot.channels.x import XRouter, collect_x
+
+        seen = []
+        monkeypatch.setattr(
+            XRouter, "timeline", lambda self, h, n, c=None: (seen.append(h), ([], [], None))[1]
+        )
+        collect_x(self._config([{"name": "OpenAI"}, "AnthropicAI"]))
+        assert seen == ["OpenAI", "AnthropicAI"], "两种写法都该拿到裸 handle"

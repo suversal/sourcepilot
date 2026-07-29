@@ -241,10 +241,14 @@ def create_app(
         handle: Annotated[str | None, Query(description="作者 handle，不带 @")] = None,
         conversation_id: Annotated[str | None, Query(description="线程 id，取整串对话")] = None,
         has_links: Annotated[bool, Query(description="只要正文带站外链接的")] = False,
+        has_article: Annotated[bool, Query(description="只要挂了长文（X Articles）的")] = False,
         since: Annotated[str | None, Query(description="ISO8601，只返回此后发布的")] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
         """推文全貌：互动数、引用链、线程、**已展开的外链**。
+
+        长文（X Articles）的正文在 `article_markdown` 里——X 的搜索与时间线
+        接口只给 100 字预览，平台会为带长文的推文单独再取一次全文。
 
         与 `/items?source=x` 的区别是形状而不是内容——那边是跨源统一的 Item，
         这边保留推文原样，给需要渲染推文卡片的消费方。正文里的 `t.co` 短链在
@@ -264,7 +268,7 @@ def create_app(
         started = time.perf_counter()
         rows = store.query_tweets(
             q=q, handle=handle, conversation_id=conversation_id,
-            has_links=has_links, since=parsed_since, limit=limit,
+            has_links=has_links, has_article=has_article, since=parsed_since, limit=limit,
         )
         return Envelope.success(
             {"tweets": rows},

@@ -77,6 +77,15 @@ class TweetRecord:
     possibly_sensitive: bool = False
     source_client: str | None = None
 
+    #: 这条推文是不是一篇长文（X Articles）的入口。搜索与时间线只给得出这个
+    #: 标记和摘要，**正文要单独一次请求**——见 GraphQLBackend.fetch_article。
+    has_article: bool = False
+    article_id: str | None = None
+    article_title: str | None = None
+    article_markdown: str | None = None
+    article_summary: str | None = None
+    article_cover: str | None = None
+
     @property
     def url(self) -> str:
         return f"https://x.com/{self.author_handle}/status/{self.tweet_id}"
@@ -161,6 +170,7 @@ def from_graphql(
         return None
 
     entities = legacy.get("entities") or {}
+    article = ((result.get("article") or {}).get("article_results") or {}).get("result") or {}
     quoted_handle, quoted_text = _quoted(result)
     source_html = result.get("source") or ""
     source_match = _SOURCE_TEXT.search(source_html)
@@ -208,4 +218,13 @@ def from_graphql(
         media=_media_entries(legacy),
         possibly_sensitive=bool(legacy.get("possibly_sensitive")),
         source_client=source_match.group(1) if source_match else None,
+        has_article=bool(article),
+        article_id=(article.get("rest_id") if article else None),
+        article_title=(article.get("title") if article else None),
+        # 正文这里一定是 None——常规接口给不出来。留给 fetch_article 填。
+        article_summary=(article.get("preview_text") if article else None),
+        article_cover=(
+            ((article.get("cover_media") or {}).get("media_info") or {}).get("original_img_url")
+            if article else None
+        ),
     )

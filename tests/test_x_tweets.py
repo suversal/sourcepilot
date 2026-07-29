@@ -229,3 +229,154 @@ class TestEndpoint:
     def test_reports_cache_mode(self, client):
         """这个端点只读缓存，不触发抓取——meta 要如实说。"""
         assert client.get("/api/v1/x/tweets").json()["meta"]["mode"] == "cache"
+
+
+class TestArticleMarkdown:
+    """X 长文的正文是 Draft.js 的 {blocks, entityMap}。
+
+    转 Markdown 而不是直接用 `plain_text`：后者把标题和正文拍平成同样的行、
+    链接只剩锚文本，下游拿到的是一堆看不出结构的段落。
+    """
+
+    def _state(self, blocks, entity_map=None):
+        return {"blocks": blocks, "entityMap": entity_map or {}}
+
+    def test_headers_become_markdown_headings(self):
+        from sourcepilot.channels.x.article import to_markdown
+
+        md = to_markdown(self._state([
+            {"type": "header-two", "text": "一、发生了什么"},
+            {"type": "unstyled", "text": "正文段落"},
+        ]))
+        assert md == "## 一、发生了什么\n\n正文段落"
+
+    def test_links_are_restored_from_entity_map(self):
+        from sourcepilot.channels.x.article import to_markdown
+
+        md = to_markdown(self._state(
+            [{"type": "unstyled", "text": "详见官网说明",
+              "entityRanges": [{"offset": 2, "length": 2, "key": "0"}]}],
+            {"0": {"type": "LINK", "data": {"url": "https://a.com"}}},
+        ))
+        assert md == "详见[官网](https://a.com)说明"
+
+    def test_multiple_links_do_not_shift_each_other(self):
+        """从前往后替换会让后一个 offset 全部错位——必须倒着来。"""
+        from sourcepilot.channels.x.article import to_markdown
+
+        md = to_markdown(self._state(
+            [{"type": "unstyled", "text": "AAA BBB",
+              "entityRanges": [{"offset": 0, "length": 3, "key": "0"},
+                               {"offset": 4, "length": 3, "key": "1"}]}],
+            {"0": {"type": "LINK", "data": {"url": "https://1"}},
+             "1": {"type": "LINK", "data": {"url": "https://2"}}},
+        ))
+        assert md == "[AAA](https://1) [BBB](https://2)"
+
+    def test_entity_map_accepts_both_shapes(self):
+        """X 有时给 dict、有时给 list——只认一种会在另一种上静默丢掉所有链接。"""
+        from sourcepilot.channels.x.article import to_markdown
+
+        blocks = [{"type": "unstyled", "text": "看这里",
+                   "entityRanges": [{"offset": 0, "length": 3, "key": "7"}]}]
+        as_list = to_markdown(self._state(
+            blocks, [{"key": "7", "value": {"type": "LINK", "data": {"url": "https://x.io"}}}]))
+        as_dict = to_markdown(self._state(
+            blocks, {"7": {"type": "LINK", "data": {"url": "https://x.io"}}}))
+        assert as_list == as_dict == "[看这里](https://x.io)"
+
+    def test_images_resolve_through_media_map(self):
+        from sourcepilot.channels.x.article import to_markdown
+
+        md = to_markdown(
+            self._state([{"type": "atomic", "text": " ",
+                          "entityRanges": [{"offset": 0, "length": 1, "key": "0"}]}],
+                        {"0": {"type": "MEDIA", "data": {"mediaItems": [{"mediaId": "m1"}]}}}),
+            {"m1": "https://pbs.twimg.com/a.jpg"},
+        )
+        assert md == "![](https://pbs.twimg.com/a.jpg)"
+
+    def test_unresolvable_image_is_skipped_not_broken(self):
+        """`![](None)` 比没有图更糟。"""
+        from sourcepilot.channels.x.article import to_markdown
+
+        md = to_markdown(
+            self._state([
+                {"type": "atomic", "text": " ",
+                 "entityRanges": [{"offset": 0, "length": 1, "key": "0"}]},
+                {"type": "unstyled", "text": "后续正文"},
+            ], {"0": {"type": "MEDIA", "data": {"mediaItems": [{"mediaId": "unknown"}]}}}),
+            {},
+        )
+        assert md == "后续正文"
+
+    def test_falls_back_to_plain_text(self):
+        """结构解析不出来时宁可少格式，也不能没内容。"""
+        from sourcepilot.channels.x.article import parse
+
+        out = parse({"rest_id": "9", "title": "标题",
+                     "content_state": {"blocks": []}, "plain_text": "兜底正文"})
+        assert out["article_markdown"] == "兜底正文"
+
+    def test_empty_article_is_none(self):
+        from sourcepilot.channels.x.article import parse
+
+        assert parse({}) is None
+        assert parse({"rest_id": "9", "content_state": {"blocks": []}, "plain_text": ""}) is None
+
+
+class TestArticleIsFlaggedButNotFetchedInline:
+    """搜索与时间线返回的 article 只有预览，正文要单独一次请求。"""
+
+    def test_search_result_marks_has_article_without_body(self):
+        from sourcepilot.channels.x.tweet import from_graphql
+
+        r = from_graphql({
+            "rest_id": "1",
+            "core": {"user_results": {"result": {"core": {"screen_name": "a"}}}},
+            "legacy": {"id_str": "1", "full_text": "看我的长文"},
+            "article": {"article_results": {"result": {
+                "rest_id": "art1", "title": "长文标题", "preview_text": "预览……"}}},
+        }, NOW, NOW)
+        assert r.has_article is True
+        assert r.article_title == "长文标题"
+        assert r.article_markdown is None, "常规接口给不出正文"
+
+    def test_plain_tweet_is_not_flagged(self):
+        from sourcepilot.channels.x.tweet import from_graphql
+
+        r = from_graphql({
+            "rest_id": "1",
+            "core": {"user_results": {"result": {"core": {"screen_name": "a"}}}},
+            "legacy": {"id_str": "1", "full_text": "普通推文"},
+        }, NOW, NOW)
+        assert r.has_article is False
+
+
+class TestArticleTextSurvivesRecollection:
+    def test_body_is_not_wiped_by_a_later_plain_collect(self, store):
+        """正文是单独一次请求换来的；常规采集拿不到它，不能覆盖成空。"""
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            "1", "a", "看我的长文", NOW, has_article=True,
+            article_title="标题", article_markdown="# 完整正文")])
+        # 下一轮搜索又碰到这条，但这次只有预览
+        store.upsert_tweets([TweetRecord(
+            "1", "a", "看我的长文", NOW, has_article=True, likes=99)])
+        (row,) = store.query_tweets(limit=10)
+        assert row["article_markdown"] == "# 完整正文", "正文不该被抹掉"
+        assert row["likes"] == 99, "但互动数照常更新"
+
+    def test_missing_article_text_finds_the_backlog(self, store):
+        """补抓任务照这个清单干活。"""
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([
+            TweetRecord("1", "a", "有长文没正文", NOW, has_article=True),
+            TweetRecord("2", "a", "有长文有正文", NOW, has_article=True,
+                        article_markdown="# 有了"),
+            TweetRecord("3", "a", "普通推文", NOW),
+        ])
+        pending = store.query_tweets(missing_article_text=True, limit=10)
+        assert [p["tweet_id"] for p in pending] == ["1"]

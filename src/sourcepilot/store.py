@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS x_tweets (
     media              TEXT NOT NULL DEFAULT '[]',
     possibly_sensitive INTEGER NOT NULL DEFAULT 0,
     source_client      TEXT,
+    -- X 长文（Articles）。推文本身只是个入口，正文在这里。
+    -- has_article=1 而 article_markdown 为空 = 还没去取正文（要单独一次请求）。
+    has_article        INTEGER NOT NULL DEFAULT 0,
+    article_id         TEXT,
+    article_title      TEXT,
+    article_markdown   TEXT,
+    article_summary    TEXT,
+    article_cover      TEXT,
     fetched_at         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tweets_created ON x_tweets(created_at DESC, tweet_id DESC);
@@ -164,6 +172,21 @@ class Store:
         for col in ("etag", "last_modified"):
             if col not in state_cols:
                 conn.execute(f"ALTER TABLE source_state ADD COLUMN {col} TEXT")
+        # x_tweets 的长文列。这张表可能在长文功能之前就建好了，
+        # CREATE TABLE IF NOT EXISTS 不会给已存在的表补列。
+        tweet_cols = {r["name"] for r in conn.execute("PRAGMA table_info(x_tweets)")}
+        if tweet_cols:  # 表存在才补，否则 SCHEMA 刚建的已经是全的
+            for col, decl in (
+                ("has_article", "INTEGER NOT NULL DEFAULT 0"),
+                ("article_id", "TEXT"),
+                ("article_title", "TEXT"),
+                ("article_markdown", "TEXT"),
+                ("article_summary", "TEXT"),
+                ("article_cover", "TEXT"),
+            ):
+                if col not in tweet_cols:
+                    conn.execute(f"ALTER TABLE x_tweets ADD COLUMN {col} {decl}")
+
         if "origin" not in existing:
             # 老库一律回填 collected。这会把历史上那几条现查缓存也当成采集内容，
             # 但反过来（默认 searched）会让整个库从信息流里消失，那个错法严重得多。
@@ -242,7 +265,9 @@ class Store:
         "created_at", "likes", "retweets", "replies", "quotes", "bookmarks", "views",
         "is_reply", "reply_to_handle", "reply_to_tweet_id", "is_quote",
         "quoted_tweet_id", "quoted_handle", "quoted_text", "urls", "hashtags",
-        "mentions", "media", "possibly_sensitive", "source_client", "fetched_at",
+        "mentions", "media", "possibly_sensitive", "source_client",
+        "has_article", "article_id", "article_title", "article_markdown",
+        "article_summary", "article_cover", "fetched_at",
     )
 
     def upsert_tweets(self, records: Iterable[Any]) -> int:
@@ -260,17 +285,28 @@ class Store:
                 json.dumps(r.hashtags, ensure_ascii=False),
                 json.dumps(r.mentions, ensure_ascii=False),
                 json.dumps(r.media, ensure_ascii=False),
-                int(r.possibly_sensitive), r.source_client, _iso(r.fetched_at),
+                int(r.possibly_sensitive), r.source_client,
+                int(r.has_article), r.article_id, r.article_title, r.article_markdown,
+                r.article_summary, r.article_cover, _iso(r.fetched_at),
             ))
         if not rows:
             return 0
+        # 显式列名而不是 `VALUES (?,?,…)` 位置插入：迁移用 ALTER TABLE 加的列
+        # 会追加在**表末尾**，与这里的声明顺序不一致，位置插入就会静默错位
+        # ——这个 bug 真实发生过，表现是 NOT NULL 约束在一个明明有默认值的列上失败。
+        columns = ",".join(self.TWEET_COLUMNS)
         placeholders = ",".join("?" * len(self.TWEET_COLUMNS))
+        # 正文字段用 COALESCE 保护：它是单独一次请求换来的，而常规采集
+        # （搜索/时间线）拿不到正文，直接覆盖会把已抓好的全文抹成 NULL。
+        protected = {"article_markdown", "article_title", "article_summary", "article_cover"}
         updates = ",".join(
-            f"{c}=excluded.{c}" for c in self.TWEET_COLUMNS if c != "tweet_id"
+            (f"{c}=COALESCE(excluded.{c}, {c})" if c in protected else f"{c}=excluded.{c}")
+            for c in self.TWEET_COLUMNS
+            if c != "tweet_id"
         )
         with self._conn() as conn:
             conn.executemany(
-                f"INSERT INTO x_tweets VALUES ({placeholders}) "
+                f"INSERT INTO x_tweets ({columns}) VALUES ({placeholders}) "
                 f"ON CONFLICT(tweet_id) DO UPDATE SET {updates}",
                 rows,
             )
@@ -283,6 +319,8 @@ class Store:
         handle: str | None = None,
         conversation_id: str | None = None,
         has_links: bool = False,
+        has_article: bool = False,
+        missing_article_text: bool = False,
         since: datetime | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -300,6 +338,11 @@ class Store:
         if has_links:
             # 空数组是 '[]'，长度 2；有内容就更长。
             where.append("length(urls) > 2")
+        if has_article:
+            where.append("has_article = 1")
+        if missing_article_text:
+            # 「知道有长文但还没取正文」——补抓任务就是照这个清单干活的。
+            where.append("has_article = 1 AND (article_markdown IS NULL OR article_markdown = '')")
         if since is not None:
             where.append("created_at > ?")
             args.append(_iso(since))
@@ -539,7 +582,7 @@ def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     for key in ("urls", "hashtags", "mentions", "media"):
         d[key] = json.loads(d[key] or "[]")
-    for key in ("author_verified", "is_reply", "is_quote", "possibly_sensitive"):
+    for key in ("author_verified", "is_reply", "is_quote", "possibly_sensitive", "has_article"):
         d[key] = bool(d[key])
     # 展开后的站外链接，下游抓原文直接用这个，不必再解析 t.co。
     d["external_urls"] = [

@@ -117,6 +117,39 @@ class XRouter:
             return result
         raise first_error or AuthExpired("X 时间线全部后端都失败了")
 
+    def fill_articles(self, records, store=None, limit: int = 10) -> int:
+        """给带长文的推文补上正文。
+
+        长文正文**每篇要单独一次请求**，所以这里只补「确实有长文、且还没取过
+        正文」的那些，并设上限——一次搜索若撞上十几篇长文，全补会打出一串请求，
+        比抓推文本身还重。补不到的下次再来（`missing_article_text` 查得到）。
+        """
+        pending = [
+            r for r in records
+            if r.has_article and not r.article_markdown
+        ][:limit]
+        if not pending or not self.graphql.available():
+            return 0
+
+        filled = 0
+        for record in pending:
+            try:
+                article = self.graphql.fetch_article(record.tweet_id)
+            except SourcePilotError as exc:
+                # 正文补不到不该影响推文本身——它已经入库了。
+                log.warning("取长文正文失败（%s）：%s", record.tweet_id, exc.code.value)
+                if exc.code in BACKEND_LEVEL_FAILURES:
+                    break  # 被限流了就别接着捅
+                continue
+            if not article:
+                continue
+            for key, value in article.items():
+                setattr(record, key, value)
+            filled += 1
+        if filled and store is not None:
+            store.upsert_tweets(pending)
+        return filled
+
     def tweet(self, handle: str, tweet_id: str) -> Item | None:
         return self._run(
             [self.fxtwitter], lambda b: b.fetch_tweet(handle, tweet_id), f"单推 {tweet_id}"
@@ -134,6 +167,10 @@ class _TweetSink:
 
     def __init__(self) -> None:
         self._store = None
+
+    @property
+    def store(self):
+        return self._store
 
     def bind(self, store) -> None:
         self._store = store
@@ -157,7 +194,9 @@ def collect_x(config: SourceConfig) -> list[Item]:
 
     契约规定 `search_x` 现查失败要能降级回缓存——库里得先有东西，那个降级才有意义。
     """
-    handles = list(config.accounts or [])
+    # accounts 是 ChannelAccount（公众号那边要 fakeid 才加的）。X 只认 handle，
+    # 取 name 即可——但不能直接传对象，下游要对它做字符串操作。
+    handles = [getattr(a, "name", a) for a in (config.accounts or [])]
     if not handles:
         return []
 
@@ -174,6 +213,8 @@ def collect_x(config: SourceConfig) -> list[Item]:
             log.warning("X 取 @%s 时间线失败：%s", handle, exc.code.value)
             continue
 
+    # 长文正文单独补。放在写库之后：推文先落地，正文补不到也不影响主线。
+    router.fill_articles(tweet_records, TWEET_SINK.store)
     TWEET_SINK.write(tweet_records)
     return items
 

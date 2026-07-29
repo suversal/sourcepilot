@@ -115,6 +115,9 @@ class XSearchService:
             self.store.upsert_items(items, origin="searched")
             # 推文全貌不分 collected/searched——它不是信息流，是「这条推文长什么样」，
             # 谁触发的抓取不影响这个事实。
+            # 长文正文单独补一次。搜到一篇长文却只给个 100 字预览，
+            # 对下游等于没拿到——正文才是长文的全部价值。
+            self.router.fill_articles(records, self.store)
             self.store.upsert_tweets(records)
 
         meta = Meta(
@@ -185,6 +188,9 @@ class XTimelineService:
             self.store.upsert_items(items, origin="searched")
             # 推文全貌不分 collected/searched——它不是信息流，是「这条推文长什么样」，
             # 谁触发的抓取不影响这个事实。
+            # 长文正文单独补一次。搜到一篇长文却只给个 100 字预览，
+            # 对下游等于没拿到——正文才是长文的全部价值。
+            self.router.fill_articles(records, self.store)
             self.store.upsert_tweets(records)
 
         return Envelope[ItemsPayload].success(

@@ -26,6 +26,19 @@ OPERATIONS: dict[str, str] = {
     "SearchTimeline": "kn0jeHGOUFYdNe_FUxwxsQ",
     "UserByScreenName": "2qvSHpkWTMS9i0zJAwDNiA",
     "UserTweets": "RIylB10EGWyBSs4ZXpQjCw",
+    # 取单条推文。**长文（X Articles）的全文只有这条路能拿到**——搜索与时间线
+    # 返回的 article 只有 preview_text，正文要靠下面那组 fieldToggles 打开。
+    "TweetResultByRestId": "LkId5Akr61BS6BmOIcffRg",
+}
+
+#: 拉长文正文时必须打开的开关。默认全是关的，所以平时的搜索/时间线拿不到正文。
+#: `withArticleRichContentState` 给结构化的 Draft.js（有标题层级和链接实体），
+#: `withArticlePlainText` 给纯文本兜底——两个都要，前者解析失败时还有后者。
+ARTICLE_FIELD_TOGGLES: dict[str, bool] = {
+    "withArticleRichContentState": True,
+    "withArticlePlainText": True,
+    "withArticleSummaryText": True,
+    "withArticleVoiceOver": False,
 }
 
 #: GraphQL 的 features flag。X 会不定期增删；缺字段时它会明确报
