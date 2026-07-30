@@ -463,7 +463,8 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 | `has_article` | 这条推文是不是长文入口 |
 | `article_title` | 长文标题（与推文正文不同） |
 | `article_markdown` | **正文，已转 Markdown**（保留标题层级、链接、配图） |
-| `article_summary` | 官方摘要或预览 |
+| `article_summary` | 正文前 ~90 字的**机械截断**，逐字忠实原文 |
+| `article_ai_summary` | X（Grok）生成的要点归纳。**二手信息**，可能为空 |
 | `article_cover` | 封面图 |
 
 正文转 Markdown 而不是给纯文本：X 也提供 `plain_text`，但那一版把二级标题
@@ -471,6 +472,12 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 
 `has_article` 为 true 但 `article_markdown` 为空 = 补取还没跑到（长文每篇
 一次请求，单轮有上限，剩下的下轮补）。
+
+**两个摘要分开是有原因的**：X 的 `summary_text` 由 Grok 延迟生成，早抓拿不到、
+晚抓才有，而且可能与正文语言不一致（实测见过中文长文配英文摘要）。合成一个
+字段的话，同一个字段有时是原文截断、有时是机器概括，**下游没法判断手里是哪种**。
+`article_ai_summary` 为空是正常的——不是所有长文 X 都会生成摘要。
+两者都**不是全文**，全文只在 `article_markdown`。
 
 ### 展示分流：`content_kind` 与 `display_*`
 

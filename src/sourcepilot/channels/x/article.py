@@ -135,7 +135,15 @@ def parse(article: dict[str, Any]) -> dict[str, Any] | None:
         "article_id": article.get("rest_id"),
         "article_title": article.get("title"),
         "article_markdown": markdown,
-        "article_summary": article.get("summary_text") or article.get("preview_text"),
+        # 两个摘要分开，因为性质完全不同：
+        #   preview_text 是正文前 ~90 字的机械截断，逐字忠实，抓到就有；
+        #   summary_text 是 Grok 生成的要点归纳，延迟生成，还可能与正文语言
+        #   不一致（实测见过中文长文配英文摘要）。
+        # 混在一个字段里的后果是**来源随抓取时机漂移**——早抓拿到截断、晚抓
+        # 拿到机器概括，下游没法判断自己手里是哪种。平台的职责是归一化而不是
+        # 分析，所以默认给忠实原文那个，AI 版另放一格由下游决定用不用。
+        "article_summary": article.get("preview_text"),
+        "article_ai_summary": article.get("summary_text"),
         "article_cover": (
             ((article.get("cover_media") or {}).get("media_info") or {}).get("original_img_url")
         ),

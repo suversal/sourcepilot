@@ -103,7 +103,11 @@ CREATE TABLE IF NOT EXISTS x_tweets (
     article_id         TEXT,
     article_title      TEXT,
     article_markdown   TEXT,
+    -- 正文前 ~90 字的机械截断，逐字忠实原文（不是全文，全文在 article_markdown）
     article_summary    TEXT,
+    -- Grok 生成的要点归纳。和上面分开是因为混在一起会让字段来源随抓取时机
+    -- 漂移——Grok 摘要是延迟生成的，早抓拿不到、晚抓才有。
+    article_ai_summary TEXT,
     article_cover      TEXT,
     fetched_at         TEXT NOT NULL
 );
@@ -184,6 +188,7 @@ class Store:
                 ("article_title", "TEXT"),
                 ("article_markdown", "TEXT"),
                 ("article_summary", "TEXT"),
+                ("article_ai_summary", "TEXT"),
                 ("article_cover", "TEXT"),
             ):
                 if col not in tweet_cols:
@@ -269,7 +274,7 @@ class Store:
         "quoted_tweet_id", "quoted_handle", "quoted_text", "urls", "hashtags",
         "mentions", "media", "possibly_sensitive", "source_client",
         "has_article", "article_id", "article_title", "article_markdown",
-        "article_summary", "article_cover", "fetched_at",
+        "article_summary", "article_ai_summary", "article_cover", "fetched_at",
     )
 
     def upsert_tweets(self, records: Iterable[Any]) -> int:
@@ -289,7 +294,7 @@ class Store:
                 json.dumps(r.media, ensure_ascii=False),
                 int(r.possibly_sensitive), r.source_client,
                 int(r.has_article), r.article_id, r.article_title, r.article_markdown,
-                r.article_summary, r.article_cover, _iso(r.fetched_at),
+                r.article_summary, r.article_ai_summary, r.article_cover, _iso(r.fetched_at),
             ))
         if not rows:
             return 0
@@ -300,7 +305,10 @@ class Store:
         placeholders = ",".join("?" * len(self.TWEET_COLUMNS))
         # 正文字段用 COALESCE 保护：它是单独一次请求换来的，而常规采集
         # （搜索/时间线）拿不到正文，直接覆盖会把已抓好的全文抹成 NULL。
-        protected = {"article_markdown", "article_title", "article_summary", "article_cover"}
+        protected = {
+            "article_markdown", "article_title", "article_summary",
+            "article_ai_summary", "article_cover",
+        }
         updates = ",".join(
             (f"{c}=COALESCE(excluded.{c}, {c})" if c in protected else f"{c}=excluded.{c}")
             for c in self.TWEET_COLUMNS

@@ -83,7 +83,12 @@ class TweetRecord:
     article_id: str | None = None
     article_title: str | None = None
     article_markdown: str | None = None
+    #: 正文前 ~90 字的机械截断，逐字忠实原文。**不是全文**——全文在
+    #: article_markdown，这里只够列表页做预览。
     article_summary: str | None = None
+    #: Grok 生成的要点归纳。**二手信息**，可能延迟生成、也可能与正文语言不一致。
+    #: 单独一格是为了让下游明确知道手里拿的是机器概括而不是原文。
+    article_ai_summary: str | None = None
     article_cover: str | None = None
 
     @property
@@ -274,6 +279,7 @@ def from_graphql(
         article_title=(article.get("title") if article else None),
         # 正文这里一定是 None——常规接口给不出来。留给 fetch_article 填。
         article_summary=(article.get("preview_text") if article else None),
+        article_ai_summary=(article.get("summary_text") if article else None),
         article_cover=(
             ((article.get("cover_media") or {}).get("media_info") or {}).get("original_img_url")
             if article else None

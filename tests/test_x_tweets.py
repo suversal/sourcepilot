@@ -504,3 +504,66 @@ class TestKindFilterEndpoint:
         r = client.get("/api/v1/x/tweets?kind=文章")
         assert r.status_code == 400
         assert "article" in r.json()["error"]["message"]
+
+
+class TestTwoSummariesAreKeptApart:
+    """X 给了两个摘要字段，性质完全不同，混在一起会让来源随抓取时机漂移。
+
+    实测：同一篇长文早抓只有 preview_text（正文截断），晚抓才有 summary_text
+    （Grok 生成）。旧写法 `summary_text or preview_text` 的结果就取决于运气，
+    下游拿到手也分不清是原文还是机器概括——而且见过中文长文配英文 AI 摘要。
+    """
+
+    def _article(self, **over):
+        base = {
+            "rest_id": "a1",
+            "title": "标题",
+            "content_state": {"blocks": [{"type": "unstyled", "text": "正文段落"}]},
+            "preview_text": "正文段落开头的截断",
+            "summary_text": "- 机器归纳的要点",
+        }
+        return {**base, **over}
+
+    def test_summary_is_the_faithful_excerpt(self):
+        from sourcepilot.channels.x.article import parse
+
+        out = parse(self._article())
+        assert out["article_summary"] == "正文段落开头的截断"
+
+    def test_ai_summary_is_kept_separately(self):
+        from sourcepilot.channels.x.article import parse
+
+        assert parse(self._article())["article_ai_summary"] == "- 机器归纳的要点"
+
+    def test_missing_grok_summary_does_not_fall_back(self):
+        """X 没生成 Grok 摘要时，ai_summary 就该是空的。
+
+        退回 preview_text 的话，下游会把一段原文截断当成机器摘要用——
+        实测确实有长文拿不到 summary_text。
+        """
+        from sourcepilot.channels.x.article import parse
+
+        out = parse(self._article(summary_text=None))
+        assert out["article_ai_summary"] is None
+        assert out["article_summary"] == "正文段落开头的截断", "忠实摘要不受影响"
+
+    def test_neither_summary_is_the_full_text(self):
+        """两个都是摘要，全文只在 article_markdown。"""
+        from sourcepilot.channels.x.article import parse
+
+        out = parse(self._article())
+        assert out["article_markdown"] == "正文段落"
+        assert len(out["article_summary"]) != len(out["article_markdown"])
+
+    def test_both_survive_a_later_plain_collect(self, store):
+        """常规采集拿不到长文字段，不能把已抓好的两个摘要覆盖成空。"""
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            "1", "a", "入口语", NOW, has_article=True, article_markdown="# 正文",
+            article_summary="忠实截断", article_ai_summary="- 机器要点")])
+        store.upsert_tweets([TweetRecord("1", "a", "入口语", NOW, has_article=True, likes=7)])
+        (row,) = store.query_tweets(limit=10)
+        assert row["article_summary"] == "忠实截断"
+        assert row["article_ai_summary"] == "- 机器要点"
+        assert row["likes"] == 7
