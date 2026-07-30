@@ -23,14 +23,18 @@
 #   cookie 里必须有 ct0——GraphQL 要求 x-csrf-token 与它相等，缺了一定被拒。
 #   **强烈建议用专用小号**：这条线抓的是内部 GraphQL，有封号风险。
 #
-# 时间线优先走零认证的 Nitter，能不动用账号就不动——账号是稀缺且脆弱的资源。
+# 时间线优先走 GraphQL，Nitter 作降级。这个顺序调过一次：原本 Nitter 优先
+# （省账号配额），但它走的是 RSS——实测一条目里只有 title/link/summary/
+# published/author 五个字段，互动数、引用链、长文一个都没有，于是订阅采集
+# 的推文进不了 x_tweets 表。当初「能不动用账号就不动」的权衡没错，错在加了
+# 推文全貌表之后没回头看它的前提还成不成立。
 name: x
 display_name: X / Twitter
 type: x
 platform: x
 enabled: true
 channel: x
-min_interval: 900
+min_interval: 1800  # 30 分钟一轮。UserTweets 配额 50 次/15 分钟，2 个订阅目标只用 2 次，间隔松一点不影响时效
 lang: en
 
 # 自建 Nitter 实例（公共实例寿命很短，实测只剩 nitter.net 的时间线还活着）
