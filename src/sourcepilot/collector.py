@@ -22,6 +22,10 @@ from .store import Store
 
 log = logging.getLogger("sourcepilot.collector")
 
+#: 连续失败时重试间隔的上限。6 小时——足够长到不再浪费请求，又足够短到
+#: 人把凭据换好之后不用等一整天才恢复采集。
+MAX_BACKOFF = 6 * 3600
+
 
 @dataclass
 class Outcome:
@@ -62,10 +66,45 @@ class Collector:
         return [c for c in configs if c.type in types]
 
     def is_due(self, config: SourceConfig, now: datetime) -> bool:
+        """这个源到点该抓了吗。
+
+        分两条路，因为**失败的源不能按成功的节奏重试**：
+
+        正常时按 `min_interval` 从上次成功算起。而失败时 `last_success_at`
+        根本不动——只看它的话，一个坏掉的源会在每一轮调度（60 秒）里都判为
+        「到点了」，然后再失败一次。公众号凭据过期三天就这样堆了 1358 次
+        无谓请求，而那种错误重试多少次都不会好。
+
+        所以失败后改从**上次尝试**算起，并按连续失败次数指数退避。封顶
+        `MAX_BACKOFF`，保证人把问题修好之后最多等这么久就会自动恢复
+        ——不封顶的话退避会涨到几天，源修好了也长时间不采。
+        """
         state = self.store.get_state(config.name)
-        if state is None or state["last_success_at"] is None:
+        if state is None:
             return True
-        return now - state["last_success_at"] >= timedelta(seconds=config.min_interval)
+
+        failures = state["consecutive_failures"] or 0
+        if failures == 0:
+            last_success = state["last_success_at"]
+            if last_success is None:
+                return True
+            return now - last_success >= timedelta(seconds=config.min_interval)
+
+        last_attempt = state["last_attempt_at"]
+        if last_attempt is None:
+            return True
+        return now - last_attempt >= timedelta(seconds=self.backoff_seconds(config, failures))
+
+    @staticmethod
+    def backoff_seconds(config: SourceConfig, failures: int) -> float:
+        """连续失败后的重试间隔：按次数翻倍，封顶 MAX_BACKOFF。
+
+        指数是因为失败原因通常分两类——网络抖动几分钟就好，凭据失效/改版
+        要人介入。前者靠前几次快速重试就能恢复，后者拖久一点也没损失。
+        用同一条曲线覆盖两者，不必先判断是哪种。
+        """
+        exponent = min(failures - 1, 10)  # 防止 2**failures 溢出成天文数字
+        return min(config.min_interval * (2**exponent), MAX_BACKOFF)
 
     def last_success(self, name: str) -> datetime | None:
         state = self.store.get_state(name)

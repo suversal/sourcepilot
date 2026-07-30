@@ -334,3 +334,87 @@ class TestConditionalRequests:
     def test_unknown_source_has_no_validators(self, store):
         """首次采集当然没有校验器，不能因此炸掉。"""
         assert store.get_validators("从没见过") == (None, None)
+
+
+class TestFailureBackoff:
+    """失败的源不能按成功的节奏重试。
+
+    `is_due` 原本只看 `last_success_at`，而失败时那个字段根本不动——
+    于是坏掉的源在每一轮调度（60 秒）里都判为「到点了」。公众号凭据过期
+    三天就这样堆了 1358 次无谓请求，而 AUTH_EXPIRED 重试多少次都不会好。
+    """
+
+    CONFIG = {
+        "name": "flaky",
+        "display_name": "会挂的源",
+        "platform": "flaky",
+        "min_interval": 600,
+        "request": {"url": "https://example.com/x"},
+        "extract": {
+            "format": "json",
+            "list": "rows",
+            "fields": {"native_id": "id", "title": "title", "url": "link"},
+        },
+    }
+
+    def _config(self):
+        from sourcepilot.sources import SourceConfig
+
+        return SourceConfig(**self.CONFIG)
+
+    def _collector(self, store):
+        from sourcepilot.collector import Collector
+
+        config = self._config()
+        return Collector(store, {"flaky": config}), config
+
+    def test_healthy_source_uses_min_interval(self, store):
+        col, config = self._collector(store)
+        store.record_success("flaky", 5, NOW)
+        assert col.is_due(config, NOW + timedelta(seconds=599)) is False
+        assert col.is_due(config, NOW + timedelta(seconds=600)) is True
+
+    def test_failed_source_waits_before_retrying(self, store):
+        """这是核心：失败后不该在下一轮调度就重试。"""
+        from sourcepilot.contracts import ErrorCode
+
+        col, config = self._collector(store)
+        store.record_failure("flaky", ErrorCode.AUTH_EXPIRED, NOW)
+        assert col.is_due(config, NOW + timedelta(seconds=60)) is False, (
+            "失败后 60 秒就重试正是那 1358 次无谓请求的来源"
+        )
+
+    def test_backoff_grows_with_consecutive_failures(self, store):
+        from sourcepilot.collector import Collector
+
+        config = self._config()
+        assert Collector.backoff_seconds(config, 1) == 600
+        assert Collector.backoff_seconds(config, 2) == 1200
+        assert Collector.backoff_seconds(config, 3) == 2400
+
+    def test_backoff_is_capped(self, store):
+        """不封顶的话退避会涨到几天，源修好了也长时间不采。"""
+        from sourcepilot.collector import MAX_BACKOFF, Collector
+
+        config = self._config()
+        assert Collector.backoff_seconds(config, 50) == MAX_BACKOFF
+
+    def test_huge_failure_count_does_not_overflow(self, store):
+        """连败 1358 次是真实发生过的数字，2**1358 会算出天文数字。"""
+        from sourcepilot.collector import MAX_BACKOFF, Collector
+
+        assert Collector.backoff_seconds(self._config(), 1358) == MAX_BACKOFF
+
+    def test_recovery_resets_to_normal_cadence(self, store):
+        """人把凭据修好、抓成功一次之后，就该回到正常节奏。"""
+        from sourcepilot.contracts import ErrorCode
+
+        col, config = self._collector(store)
+        for _ in range(5):
+            store.record_failure("flaky", ErrorCode.AUTH_EXPIRED, NOW)
+        store.record_success("flaky", 3, NOW)
+        assert col.is_due(config, NOW + timedelta(seconds=600)) is True
+
+    def test_never_collected_source_is_due(self, store):
+        col, config = self._collector(store)
+        assert col.is_due(config, NOW) is True
