@@ -567,3 +567,116 @@ class TestTwoSummariesAreKeptApart:
         assert row["article_summary"] == "忠实截断"
         assert row["article_ai_summary"] == "- 机器要点"
         assert row["likes"] == 7
+
+
+class TestRetweetIsRecognized:
+    """转发不识别出来的话，作者归属直接错。
+
+    实测：@AnthropicAI 转发 @claudeai 的推文，外层 text 是
+    `RT @claudeai: …` 的截断，作者记成 AnthropicAI——下游会以为
+    这是 Anthropic 官方原创，而真正的作者是 claudeai。
+    """
+
+    def _rt(self, inner_handle="claudeai", inner_text="原推完整正文"):
+        return {
+            "rest_id": "1",
+            "core": {"user_results": {"result": {"core": {"screen_name": "AnthropicAI"}}}},
+            "legacy": {
+                "id_str": "1",
+                "full_text": f"RT @{inner_handle}: {inner_text[:20]}…",
+                "retweeted_status_result": {"result": {
+                    "legacy": {"id_str": "999", "full_text": inner_text},
+                    "core": {"user_results": {"result": {"core": {"screen_name": inner_handle}}}},
+                }},
+            },
+        }
+
+    def test_original_author_is_captured(self):
+        from sourcepilot.channels.x.tweet import from_graphql
+
+        r = from_graphql(self._rt(), NOW, NOW)
+        assert r.is_retweet is True
+        assert r.author_handle == "AnthropicAI", "外层作者仍是转发者"
+        assert r.retweeted_handle == "claudeai", "原作者必须留下"
+        assert r.retweeted_text == "原推完整正文"
+
+    def test_plain_tweet_is_not_a_retweet(self):
+        from sourcepilot.channels.x.tweet import from_graphql
+
+        r = from_graphql({
+            "rest_id": "1",
+            "core": {"user_results": {"result": {"core": {"screen_name": "a"}}}},
+            "legacy": {"id_str": "1", "full_text": "普通推文"},
+        }, NOW, NOW)
+        assert r.is_retweet is False and r.retweeted_handle is None
+
+    def test_display_text_shows_the_original(self):
+        """外层的 `RT @某某: …` 是截断版，按它渲染会把完整推文显示成半句话。"""
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, body = display_fields({
+            "text": "RT @claudeai: Introducing Claude…",
+            "is_retweet": True,
+            "retweeted_text": "Introducing Claude Opus 5. 完整的原文内容",
+        })
+        assert body == "Introducing Claude Opus 5. 完整的原文内容"
+
+
+class TestTweetTypeIsSeparateFromContentKind:
+    """两个维度：tweet_type 是 X 的客观关系，content_kind 是展示形态。"""
+
+    def test_four_relations(self):
+        from sourcepilot.channels.x.tweet import tweet_type
+
+        assert tweet_type({"is_retweet": True, "is_quote": True}) == "repost"
+        assert tweet_type({"is_quote": True, "is_reply": True}) == "quote"
+        assert tweet_type({"is_reply": True}) == "reply"
+        assert tweet_type({}) == "original"
+
+    def test_repost_wins_in_content_kind_too(self):
+        """转发的外层没有自己的内容，这个事实盖过长文/长推文等其它判据。"""
+        from sourcepilot.channels.x.tweet import classify
+
+        assert classify({"is_retweet": True, "has_article": True, "text": "x" * 500}) == "repost"
+
+
+class TestTypeFilterIsPushedToSql:
+    """按关系过滤必须下推到 SQL，不能取出来再筛。
+
+    这个 bug 真实发生过：端点先取 limit*5 条再在应用层过滤，而转发在这个
+    账号里全集中在较早的时间段——最新 20 条里一条都没有，接口返回空列表，
+    但库里明明有 4 条。占比低的类别多取多少倍都可能漏。
+    """
+
+    def _add(self, store, tid, *, retweet=False, quote=False, reply=False, minute=0):
+        from datetime import timedelta
+
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            tid, "a", "内容", NOW, created_at=NOW + timedelta(minutes=minute),
+            is_retweet=retweet, is_quote=quote, is_reply=reply,
+            retweeted_handle="orig" if retweet else None)])
+
+    def test_finds_old_reposts_beyond_the_first_page(self, store):
+        # 转发很老，前面压着一堆新的原创
+        self._add(store, "old_rt", retweet=True, minute=0)
+        for i in range(30):
+            self._add(store, f"new_{i}", minute=10 + i)
+        found = store.query_tweets(tweet_types={"repost"}, limit=5)
+        assert [t["tweet_id"] for t in found] == ["old_rt"]
+
+    def test_each_relation_is_exclusive(self, store):
+        self._add(store, "rt", retweet=True)
+        self._add(store, "q", quote=True)
+        self._add(store, "r", reply=True)
+        self._add(store, "o")
+        for kind, tid in (("repost", "rt"), ("quote", "q"), ("reply", "r"), ("original", "o")):
+            got = store.query_tweets(tweet_types={kind}, limit=10)
+            assert [t["tweet_id"] for t in got] == [tid], f"{kind} 应只匹配 {tid}"
+
+    def test_multiple_types(self, store):
+        self._add(store, "rt", retweet=True)
+        self._add(store, "o")
+        got = store.query_tweets(tweet_types={"repost", "original"}, limit=10)
+        assert len(got) == 2

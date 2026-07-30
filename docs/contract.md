@@ -479,6 +479,25 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 `article_ai_summary` 为空是正常的——不是所有长文 X 都会生成摘要。
 两者都**不是全文**，全文只在 `article_markdown`。
 
+### 两个维度：`tweet_type` 与 `content_kind`
+
+别混，它们回答不同的问题：
+
+| | 回答什么 | 取值 | 谁定的 |
+|---|---|---|---|
+| `tweet_type` | 这条推文**是什么** | `original` `reply` `quote` `repost` | X 平台的客观关系 |
+| `content_kind` | **该怎么展示** | `repost` `article` `longform` `link` `quote` `brief` | 本平台的确定性规则 |
+
+一条推文**同时有这两个属性**。`is_reply` 与 `is_quote` 可以同时成立（回复某人
+时引用了另一条），所以 `tweet_type` 给的是主类型（优先级 repost > quote >
+reply > original），精确判断仍用那几个布尔字段。
+
+**转发（`repost`）必须单独识别**：外层那条推文没有自己的内容——正文是
+`RT @某某: …` 的截断，互动数记的是转发这个动作，真正的原文与热度都在被转发
+的那条上。不识别的话，`@AnthropicAI` 转发 `@claudeai` 的内容会被记成 Anthropic
+官方原创，**作者归属直接错**。原作者与原文在 `retweeted_handle` / `retweeted_text`，
+`display_text` 也会自动换成原文。
+
 ### 展示分流：`content_kind` 与 `display_*`
 
 推文不是一种内容，是几种。一篇 3 万阅读的长文和一句 59 字的吐槽塞进同一个
@@ -487,6 +506,7 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 
 | `content_kind` | 判据 | 下游怎么处理 |
 |---|---|---|
+| `repost` | 纯转发 | 内容整个是别人的，展示 `retweeted_*` |
 | `article` | 挂了长文 | 走文章流程，**正文已在 `article_markdown`，不必再拉** |
 | `longform` | 正文 > 280 字 | 走文章流程，推文本身就是内容 |
 | `link` | 带站外链接 | 真内容在 `external_urls`，按普通文章抓 |

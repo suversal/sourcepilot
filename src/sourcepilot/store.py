@@ -16,6 +16,7 @@ from typing import Any
 
 from .channels.x.tweet import classify as classify_tweet
 from .channels.x.tweet import display_fields as tweet_display_fields
+from .channels.x.tweet import tweet_type as tweet_type_of
 from .contracts import (
     BadRequest,
     Category,
@@ -89,6 +90,12 @@ CREATE TABLE IF NOT EXISTS x_tweets (
     quoted_tweet_id    TEXT,
     quoted_handle      TEXT,
     quoted_text        TEXT,
+    -- 纯转发（RT）。外层那条没有自己的内容——正文是 `RT @某某: …` 的截断，
+    -- 互动数记的是转发动作，真正的原文与热度都在被转发的那条上。
+    is_retweet         INTEGER NOT NULL DEFAULT 0,
+    retweeted_tweet_id TEXT,
+    retweeted_handle   TEXT,
+    retweeted_text     TEXT,
     -- 以下四个是 JSON 数组。urls 里的 expanded_url 是**展开后的真实地址**，
     -- 正文里那些 t.co 短链解析不动也不该去解析（慢，且会在对方统计里留点击）。
     urls               TEXT NOT NULL DEFAULT '[]',
@@ -187,6 +194,10 @@ class Store:
                 ("article_id", "TEXT"),
                 ("article_title", "TEXT"),
                 ("article_markdown", "TEXT"),
+                ("is_retweet", "INTEGER NOT NULL DEFAULT 0"),
+                ("retweeted_tweet_id", "TEXT"),
+                ("retweeted_handle", "TEXT"),
+                ("retweeted_text", "TEXT"),
                 ("article_summary", "TEXT"),
                 ("article_ai_summary", "TEXT"),
                 ("article_cover", "TEXT"),
@@ -271,7 +282,9 @@ class Store:
         "author_avatar", "author_verified", "author_followers", "text", "lang",
         "created_at", "likes", "retweets", "replies", "quotes", "bookmarks", "views",
         "is_reply", "reply_to_handle", "reply_to_tweet_id", "is_quote",
-        "quoted_tweet_id", "quoted_handle", "quoted_text", "urls", "hashtags",
+        "quoted_tweet_id", "quoted_handle", "quoted_text",
+        "is_retweet", "retweeted_tweet_id", "retweeted_handle", "retweeted_text",
+        "urls", "hashtags",
         "mentions", "media", "possibly_sensitive", "source_client",
         "has_article", "article_id", "article_title", "article_markdown",
         "article_summary", "article_ai_summary", "article_cover", "fetched_at",
@@ -288,6 +301,7 @@ class Store:
                 r.likes, r.retweets, r.replies, r.quotes, r.bookmarks, r.views,
                 int(r.is_reply), r.reply_to_handle, r.reply_to_tweet_id, int(r.is_quote),
                 r.quoted_tweet_id, r.quoted_handle, r.quoted_text,
+                int(r.is_retweet), r.retweeted_tweet_id, r.retweeted_handle, r.retweeted_text,
                 json.dumps(r.urls, ensure_ascii=False),
                 json.dumps(r.hashtags, ensure_ascii=False),
                 json.dumps(r.mentions, ensure_ascii=False),
@@ -331,6 +345,7 @@ class Store:
         has_links: bool = False,
         has_article: bool = False,
         missing_article_text: bool = False,
+        tweet_types: set[str] | None = None,
         since: datetime | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -348,6 +363,18 @@ class Store:
         if has_links:
             # 空数组是 '[]'，长度 2；有内容就更长。
             where.append("length(urls) > 2")
+        if tweet_types:
+            # 下推到 SQL 而不是取出来再筛：应用层过滤要靠「多取几倍」来凑数，
+            # 而转发这类占比低的关系往往全在较早的时间段，多取多少都可能漏。
+            clauses = {
+                "repost": "is_retweet = 1",
+                "quote": "is_retweet = 0 AND is_quote = 1",
+                "reply": "is_retweet = 0 AND is_quote = 0 AND is_reply = 1",
+                "original": "is_retweet = 0 AND is_quote = 0 AND is_reply = 0",
+            }
+            picked = [clauses[k] for k in sorted(tweet_types) if k in clauses]
+            if picked:
+                where.append("(" + " OR ".join(f"({c})" for c in picked) + ")")
         if has_article:
             where.append("has_article = 1")
         if missing_article_text:
@@ -624,7 +651,8 @@ def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     for key in ("urls", "hashtags", "mentions", "media"):
         d[key] = json.loads(d[key] or "[]")
-    for key in ("author_verified", "is_reply", "is_quote", "possibly_sensitive", "has_article"):
+    for key in ("author_verified", "is_reply", "is_quote", "is_retweet",
+                "possibly_sensitive", "has_article"):
         d[key] = bool(d[key])
     # 展开后的站外链接，下游抓原文直接用这个，不必再解析 t.co。
     d["external_urls"] = [
@@ -636,6 +664,8 @@ def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
     ]
     d["url"] = f"https://x.com/{d['author_handle']}/status/{d['tweet_id']}"
     # 派生字段：读取时算而不是存库。规则以后要调，存库的话历史数据会跟新规则不一致。
+    # 两个维度：tweet_type 是 X 的客观关系，content_kind 是展示形态。
+    d["tweet_type"] = tweet_type_of(d)
     d["content_kind"] = classify_tweet(d)
     d["display_title"], d["display_text"] = tweet_display_fields(d)
     return d

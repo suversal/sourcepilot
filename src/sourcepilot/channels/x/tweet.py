@@ -66,6 +66,14 @@ class TweetRecord:
     quoted_handle: str | None = None
     quoted_text: str | None = None
 
+    #: 纯转发（RT）。**外层那条推文本身没有内容**——正文是 `RT @某某: …` 的
+    #: 截断，互动数记的是转发这个动作，真正的原文与热度都在被转发的那条上。
+    #: 不识别出来的话，转发会被当成转发者的原创，作者归属直接错。
+    is_retweet: bool = False
+    retweeted_tweet_id: str | None = None
+    retweeted_handle: str | None = None
+    retweeted_text: str | None = None
+
     #: 展开后的外链：[{url, expanded_url, display_url}]。正文里是 t.co 短链，
     #: 真实地址在这里——下游要抓原文时用 expanded_url，别去解析短链。
     urls: list[dict[str, str]] = field(default_factory=list)
@@ -111,6 +119,27 @@ class TweetRecord:
 LONGFORM_CHARS = 280
 
 
+def tweet_type(row: dict[str, Any]) -> str:
+    """这条推文和别人是什么关系——**X 平台自己的客观事实**，不是我们的规则。
+
+    与 `content_kind` 是两个维度，别混：这个回答「它是什么」（原创/回复/引用/
+    转发），`content_kind` 回答「该怎么展示」（长文/卡片/…）。一条推文同时有
+    这两个属性。
+
+    四种关系里 `is_reply` 与 `is_quote` **可以同时成立**（在回复某人时引用了
+    另一条），所以这里给的是**主类型**，精确判断仍用那几个布尔字段。
+    优先级：转发 > 引用 > 回复 > 原创——转发的外层没有自己的内容，
+    这个事实盖过其余。
+    """
+    if row.get("is_retweet"):
+        return "repost"
+    if row.get("is_quote"):
+        return "quote"
+    if row.get("is_reply"):
+        return "reply"
+    return "original"
+
+
 def classify(row: dict[str, Any]) -> str:
     """这条推文该按什么形态展示。
 
@@ -121,12 +150,18 @@ def classify(row: dict[str, Any]) -> str:
     判定是**确定性规则**，不涉及语义理解——那是下游的事（同 categories 的原则）。
     优先级从高到低，一条推文可能同时满足多条，取最高的那个：
 
+      repost   纯转发，内容整个是别人的
       article  挂了长文，正文在 article_markdown
       longform 推文本身够长，自己就是内容
       link     带站外链接，真内容在链接里
       quote    引用别人，上下文在被引那条
       brief    一句话
+
+    `repost` 排在最前：转发的外层正文只是 `RT @某某: …` 的截断，
+    把它按其它任何一类展示都会把别人的内容记在转发者名下。
     """
+    if row.get("is_retweet"):
+        return "repost"
     if row.get("has_article"):
         return "article"
     if len(row.get("text") or "") > LONGFORM_CHARS:
@@ -150,6 +185,13 @@ def display_fields(row: dict[str, Any]) -> tuple[str, str]:
     if row.get("has_article") and (row.get("article_markdown") or "").strip():
         title = row.get("article_title") or (row.get("text") or "")[:60]
         return title, row["article_markdown"]
+
+    # 转发展示被转的原文。外层的 `RT @某某: …` 是截断版，按它渲染等于
+    # 把一条完整推文显示成半句话——而且看起来像是转发者自己写的。
+    if row.get("is_retweet") and (row.get("retweeted_text") or "").strip():
+        text = row["retweeted_text"]
+        first_line = text.strip().split("\n", 1)[0]
+        return (first_line[:60] or text[:60]), text
 
     text = row.get("text") or ""
     # 没有标题的推文取首行；首行过长就截断，别把整段塞进标题。
@@ -176,24 +218,33 @@ def _media_entries(legacy: dict[str, Any]) -> list[dict[str, str]]:
     return out
 
 
+def _inner_tweet(result: dict[str, Any], key: str) -> dict[str, Any]:
+    """取嵌套的推文（被引用的 / 被转发的）。两者结构一样，只是键不同。"""
+    inner = (result.get(key) or {}).get("result") or {}
+    if inner.get("__typename") == "TweetWithVisibilityResults":
+        inner = inner.get("tweet") or {}
+    return inner
+
+
+def _tweet_author_and_text(inner: dict[str, Any]) -> tuple[str | None, str | None]:
+    if not inner:
+        return None, None
+    legacy = inner.get("legacy") or {}
+    user = ((inner.get("core") or {}).get("user_results") or {}).get("result") or {}
+    handle = (user.get("core") or {}).get("screen_name") or (user.get("legacy") or {}).get(
+        "screen_name"
+    )
+    note = ((inner.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result") or {}
+    return handle, (note.get("text") or legacy.get("full_text") or None)
+
+
 def _quoted(result: dict[str, Any]) -> tuple[str | None, str | None]:
     """被引用推文的作者与正文。
 
     引用推文常常只有一句「看这个」，信息全在被引用的那条里——不带上它，
     下游拿到的就是一条没有上下文的孤立发言。
     """
-    quoted = (result.get("quoted_status_result") or {}).get("result") or {}
-    if quoted.get("__typename") == "TweetWithVisibilityResults":
-        quoted = quoted.get("tweet") or {}
-    if not quoted:
-        return None, None
-    legacy = quoted.get("legacy") or {}
-    user = ((quoted.get("core") or {}).get("user_results") or {}).get("result") or {}
-    handle = (user.get("core") or {}).get("screen_name") or (user.get("legacy") or {}).get(
-        "screen_name"
-    )
-    note = ((quoted.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result") or {}
-    return handle, (note.get("text") or legacy.get("full_text") or None)
+    return _tweet_author_and_text(_inner_tweet(result, "quoted_status_result"))
 
 
 def from_graphql(
@@ -228,6 +279,8 @@ def from_graphql(
     entities = legacy.get("entities") or {}
     article = ((result.get("article") or {}).get("article_results") or {}).get("result") or {}
     quoted_handle, quoted_text = _quoted(result)
+    retweeted = _inner_tweet(legacy, "retweeted_status_result")
+    rt_handle, rt_text = _tweet_author_and_text(retweeted)
     source_html = result.get("source") or ""
     source_match = _SOURCE_TEXT.search(source_html)
 
@@ -257,6 +310,10 @@ def from_graphql(
         quoted_tweet_id=legacy.get("quoted_status_id_str"),
         quoted_handle=quoted_handle,
         quoted_text=quoted_text,
+        is_retweet=bool(retweeted),
+        retweeted_tweet_id=(retweeted.get("legacy") or {}).get("id_str") or None,
+        retweeted_handle=rt_handle,
+        retweeted_text=rt_text,
         urls=[
             {
                 "url": u.get("url") or "",

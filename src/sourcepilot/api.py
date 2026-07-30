@@ -242,9 +242,13 @@ def create_app(
         conversation_id: Annotated[str | None, Query(description="线程 id，取整串对话")] = None,
         has_links: Annotated[bool, Query(description="只要正文带站外链接的")] = False,
         has_article: Annotated[bool, Query(description="只要挂了长文（X Articles）的")] = False,
+        tweet_type: Annotated[
+            str | None,
+            Query(description="按 X 的关系过滤：original|reply|quote|repost，逗号分隔"),
+        ] = None,
         kind: Annotated[
             str | None,
-            Query(description="按形态过滤：article|longform|link|quote|brief，逗号分隔"),
+            Query(description="按形态过滤：repost|article|longform|link|quote|brief，逗号分隔"),
         ] = None,
         since: Annotated[str | None, Query(description="ISO8601，只返回此后发布的")] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -269,27 +273,45 @@ def create_app(
                     Envelope.failure(ErrorCode.BAD_REQUEST, f"since 不是合法 ISO8601：{since}"),
                     400,
                 )
+        wanted_types = None
+        if tweet_type:
+            wanted_types = {k.strip() for k in tweet_type.split(",") if k.strip()}
+            unknown = wanted_types - {"original", "reply", "quote", "repost"}
+            if unknown:
+                return _envelope_response(
+                    Envelope.failure(
+                        ErrorCode.BAD_REQUEST,
+                        f"未知类型 {', '.join(sorted(unknown))}，"
+                        f"可用：original, reply, quote, repost",
+                    ),
+                    400,
+                )
+
         started = time.perf_counter()
         rows = store.query_tweets(
+            tweet_types=wanted_types,
             q=q, handle=handle, conversation_id=conversation_id,
             has_links=has_links, has_article=has_article, since=parsed_since,
             # content_kind 是读取时算的派生字段，SQL 里没有，所以在这一层过滤。
             # 多取一些再筛，避免过滤后不够 limit。
+            # content_kind 是读取时算的派生字段，SQL 里没有，只能取出来再筛——
+            # 所以按它过滤时多取几倍。tweet_type 已经下推到 SQL，不受这条影响。
             limit=limit if not kind else limit * 5,
         )
         if kind:
             wanted = {k.strip() for k in kind.split(",") if k.strip()}
-            unknown = wanted - {"article", "longform", "link", "quote", "brief"}
+            unknown = wanted - {"repost", "article", "longform", "link", "quote", "brief"}
             if unknown:
                 return _envelope_response(
                     Envelope.failure(
                         ErrorCode.BAD_REQUEST,
                         f"未知形态 {', '.join(sorted(unknown))}，"
-                        f"可用：article, longform, link, quote, brief",
+                        f"可用：repost, article, longform, link, quote, brief",
                     ),
                     400,
                 )
-            rows = [r for r in rows if r["content_kind"] in wanted][:limit]
+            rows = [r for r in rows if r["content_kind"] in wanted]
+        rows = rows[:limit]
         return Envelope.success(
             {"tweets": rows},
             Meta(
