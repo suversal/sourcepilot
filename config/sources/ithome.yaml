@@ -9,7 +9,7 @@ display_name: IT之家
 type: hotlist
 platform: ithome
 enabled: true
-min_interval: 600
+min_interval: 3600
 lang: zh
 
 request:

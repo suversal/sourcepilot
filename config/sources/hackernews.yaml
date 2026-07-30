@@ -7,7 +7,7 @@ type: hotlist
 platform: hackernews
 enabled: true
 ranked: true
-min_interval: 600
+min_interval: 3600
 lang: en
 
 request:

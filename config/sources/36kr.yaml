@@ -7,7 +7,7 @@ display_name: 36氪
 type: hotlist
 platform: 36kr
 enabled: true
-min_interval: 900
+min_interval: 3600
 lang: zh
 
 request:

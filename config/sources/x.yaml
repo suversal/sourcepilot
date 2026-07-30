@@ -34,7 +34,7 @@ type: x
 platform: x
 enabled: true
 channel: x
-min_interval: 1800  # 30 分钟一轮。UserTweets 配额 50 次/15 分钟，2 个订阅目标只用 2 次，间隔松一点不影响时效
+min_interval: 3600
 lang: en
 
 # 自建 Nitter 实例（公共实例寿命很短，实测只剩 nitter.net 的时间线还活着）

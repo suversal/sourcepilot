@@ -5,7 +5,7 @@ type: hotlist
 platform: v2ex
 enabled: true
 ranked: true
-min_interval: 900  # 实测 16 条/天
+min_interval: 3600
 lang: zh
 
 request:

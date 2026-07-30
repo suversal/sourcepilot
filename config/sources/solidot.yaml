@@ -4,7 +4,7 @@ display_name: Solidot
 type: hotlist
 platform: solidot
 enabled: true
-min_interval: 1800  # 实测 3 条/天
+min_interval: 3600
 lang: zh
 
 request:

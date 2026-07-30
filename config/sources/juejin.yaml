@@ -5,7 +5,7 @@ type: hotlist
 platform: juejin
 enabled: true
 ranked: true
-min_interval: 900
+min_interval: 3600
 lang: zh
 
 request:

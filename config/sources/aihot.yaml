@@ -13,7 +13,7 @@ display_name: AIHOT 中文 AI 资讯
 type: hotlist
 platform: aihot
 enabled: true
-min_interval: 600
+min_interval: 3600
 lang: zh
 
 request:
