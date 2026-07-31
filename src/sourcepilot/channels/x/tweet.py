@@ -189,8 +189,11 @@ def display_fields(row: dict[str, Any]) -> tuple[str, str]:
     带外链的那类**不在这里解析外链正文**：那要额外出网，是 read_article 的活，
     不该藏在一个取字段的函数里。下游拿 external_urls 自己去抓。
     """
+    media = row.get("media") or []
     if row.get("has_article") and (row.get("article_markdown") or "").strip():
         title = row.get("article_title") or (row.get("text") or "")[:60]
+        # 长文的配图在抓正文时已经内嵌，这里不再拼推文自身的 media——
+        # 那只是长文卡片的封面预览，重复出现一次没有意义。
         return title, row["article_markdown"]
 
     # 转发展示被转的原文。外层的 `RT @某某: …` 是截断版，按它渲染等于
@@ -198,13 +201,15 @@ def display_fields(row: dict[str, Any]) -> tuple[str, str]:
     if row.get("is_retweet") and (row.get("retweeted_text") or "").strip():
         text = row["retweeted_text"]
         first_line = text.strip().split("\n", 1)[0]
-        return (first_line[:60] or text[:60]), text
+        # RT 壳的 media 就是原推的（X 原样复制过来），拼上不算张冠李戴。
+        return (first_line[:60] or text[:60]), _weave_rich_text(text, [], media)
 
     text = row.get("text") or ""
     # 没有标题的推文取首行；首行过长就截断，别把整段塞进标题。
     # 标题取自**无标记**的原文——`**` 混进标题只会碍事。
     first_line = text.strip().split("\n", 1)[0]
-    return (first_line[:60] or text[:60]), _styled_text(text, row.get("richtext_tags") or [])
+    styled = _weave_rich_text(text, row.get("richtext_tags") or [], media)
+    return (first_line[:60] or text[:60]), styled
 
 
 #: richtext_types 值 → Markdown 标记。与 article 侧一样按小写比对，
@@ -212,13 +217,28 @@ def display_fields(row: dict[str, Any]) -> tuple[str, str]:
 _RICHTEXT_MARK = {"bold": "**", "italic": "*"}
 
 
-def _styled_text(text: str, tags: list[dict[str, Any]]) -> str:
-    """把 note tweet 的富文本标记织成 Markdown。没有标记时原样返回。
+def _media_markdown(entry: dict[str, Any]) -> str:
+    """一条媒体的 Markdown 表示。视频给「可点击的缩略图」——Markdown 嵌不了
+    播放器，缩略图套上视频链接是它能表达的极限。"""
+    url = entry.get("url") or ""
+    thumb = entry.get("thumbnail") or ""
+    if entry.get("type") in ("video", "animated_gif") and thumb and thumb != url:
+        return f"[![]({thumb})]({url})"
+    return f"![]({url})"
 
-    一段区间可以同时是 Bold+Italic（types 是数组），嵌套地各套一层。
+
+def _weave_rich_text(text: str, tags: list[dict[str, Any]], media: list[dict[str, Any]]) -> str:
+    """把富文本标记和图片织进正文，产出 Markdown。没有素材时原样返回。
+
+    样式：一段区间可以同时是 Bold+Italic（types 是数组），嵌套地各套一层。
     区间边缘的空白缩进去——`**x **` 不是合法强调，同 article 侧的处理。
+
+    图片：note tweet 的行内图（`inline_index`）织在原文位置，其余追加在
+    正文末尾。织完后把正文里指向这些媒体的 t.co 残链清掉——图已经在正文里，
+    留一个指向同一张图的短链只会碍事。老数据的 media 没存 `tco`，清不了，
+    原样保留（和改动前的表现一致）。
     """
-    if not tags:
+    if not tags and not media:
         return text
     from .article import weave_spans  # 放函数内避免模块级循环引用
 
@@ -236,25 +256,52 @@ def _styled_text(text: str, tags: list[dict[str, Any]]) -> str:
             mark = _RICHTEXT_MARK.get(str(kind).lower())
             if mark:
                 spans.append((start, len(stripped), mark, mark))
-    return weave_spans(text, spans) if spans else text
+
+    trailing: list[str] = []
+    for entry in media:
+        if not entry.get("url"):
+            continue
+        idx = entry.get("inline_index")
+        if isinstance(idx, int) and 0 <= idx <= len(text):
+            # 零长度区间 = 单点插入。前后各空一行，别和正文粘在一起。
+            spans.append((idx, 0, f"\n\n{_media_markdown(entry)}\n\n", ""))
+        else:
+            trailing.append(_media_markdown(entry))
+
+    woven = weave_spans(text, spans) if spans else text
+    for tco in {e.get("tco") for e in media if e.get("tco")}:
+        woven = woven.replace(tco, "")
+    woven = woven.rstrip()
+    if trailing:
+        woven = woven + "\n\n" + "\n\n".join(trailing)
+    return woven
 
 
 def _media_entries(legacy: dict[str, Any]) -> list[dict[str, str]]:
-    """媒体优先取 extended_entities——多图推文在 entities 里只出现第一张。"""
+    """媒体优先取 extended_entities——多图推文在 entities 里只出现第一张。
+
+    `media_id` 留着给 note tweet 的行内图片定位（inline_media 按 id 引用）；
+    `tco` 是正文里指向这张图的 t.co 短链——图片拼进 display_text 之后，
+    这个残链就该从正文里清掉，不然读者看到的是「图 + 一个指向同一张图的死链」。
+    """
     entries = (legacy.get("extended_entities") or legacy.get("entities") or {}).get("media") or []
     out: list[dict[str, str]] = []
     for entry in entries:
         kind = entry.get("type") or "photo"
         url = entry.get("media_url_https")
+        extra = {
+            "media_id": str(entry.get("id_str") or ""),
+            "tco": entry.get("url") or "",
+        }
         if kind in ("video", "animated_gif"):
             # 挑码率最高的那个变体；没有 bitrate 的是 m3u8 播放列表，排在后面。
             variants = (entry.get("video_info") or {}).get("variants") or []
             best = max(variants, key=lambda v: _int(v.get("bitrate")) or -1, default=None)
             if best and best.get("url"):
-                out.append({"type": kind, "url": best["url"], "thumbnail": url or ""})
+                out.append({"type": kind, "url": best["url"], "thumbnail": url or "", **extra})
                 continue
         if url:
-            out.append({"type": kind, "url": url, "thumbnail": url})
+            out.append({"type": kind, "url": url, "thumbnail": url, **extra})
     return out
 
 
@@ -320,8 +367,18 @@ def from_graphql(
     # 富文本标记的下标指向**未 strip 的** note 正文；上面剥掉了首部空白，
     # 下标就得跟着平移，否则整套标记向右错一段。
     richtext_tags: list[dict[str, Any]] = []
+    media_entries = _media_entries(legacy)
     if note.get("text"):
         lead = len(raw_text) - len(raw_text.lstrip())
+        # note tweet 的图片可以插在正文中间（inline_media 按 media_id 指位置），
+        # 位置记进 media 条目里，display_text 织入时按它落位。
+        for im in ((note.get("media") or {}).get("inline_media") or []):
+            mid, idx = str(im.get("media_id") or ""), _int(im.get("index"))
+            if not mid or idx is None:
+                continue
+            for entry in media_entries:
+                if entry.get("media_id") == mid:
+                    entry["inline_index"] = max(idx - lead, 0)
         for tag in ((note.get("richtext") or {}).get("richtext_tags") or []):
             start, end = _int(tag.get("from_index")), _int(tag.get("to_index"))
             kinds = [str(k) for k in (tag.get("richtext_types") or [])]
@@ -385,7 +442,7 @@ def from_graphql(
             for m in (entities.get("user_mentions") or [])
             if m.get("screen_name")
         ],
-        media=_media_entries(legacy),
+        media=media_entries,
         possibly_sensitive=bool(legacy.get("possibly_sensitive")),
         source_client=source_match.group(1) if source_match else None,
         richtext_tags=richtext_tags,

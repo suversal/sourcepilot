@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.7.0
+# SourcePilot · 工具契约 v1.8.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.7.0",
+    "contract_version": "1.8.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -496,6 +496,19 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 消费方约定：**`display_text` 自 v1.7.0 起可能含 Markdown 标记**（此前仅
 article 类如此，现在 longform 也会），渲染端统一按 Markdown 处理即可；
 纯文本场景（通知、去重、搜索索引）用 `text`。
+
+**配图拼接（v1.8.0 新增）**：`display_text` 现在自带图片——
+
+- 普通推文/长推：图片以 `![](url)` 追加在正文末尾；note tweet 声明了行内
+  位置的图织在原文位置；视频给「可点击的缩略图」`[![](缩略图)](视频)`。
+- 正文里指向这些媒体的 `t.co` 残链会被清掉（图已经在正文里，留一个指向
+  同一张图的短链只会碍事）；v1.8.0 之前采集的老数据没存短链映射，清不了，
+  原样保留。
+- 转发拼的是原推的媒体；article 类不拼（配图已内嵌在 `article_markdown`，
+  推文自身的 media 只是长文卡片的封面预览）。
+
+**按 `display_text` 渲染时不要再另行渲染 `media` 数组**，否则同一张图出现
+两次。`media` 数组保持原样，供需要自己控制版式的消费方使用。
 
 ### 两个维度：`tweet_type` 与 `content_kind`
 

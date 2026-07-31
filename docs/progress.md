@@ -161,4 +161,5 @@ P2 = 体验问题**。
 | `ad05650` | 接入 newsnow 科技分类全量：引擎补 HTML/RSS 提取器 + TLS 指纹伪装，信源 4 → 14 |
 | `7f35ad6` | 接入 8 家 AI 厂商官方发布；契约加 `vendor` 类型升 1.1.0；补后台调度器（T2） |
 | （中间提交见 git log） | 字节 Seed 博客流、X 推文全貌 `x_tweets`、长文抓取、转发识别、GraphQL-first 等，契约推进至 1.6.0 |
-| 本次 | 富文本样式落地（契约 1.7.0）：article 正文补行内加粗/斜体；note 长推的 `richtext_tags` 入库并织进 `display_text`；库存 3 篇 article 已重取带样式 |
+| `f954e41` | 富文本样式落地（契约 1.7.0）：article 正文补行内加粗/斜体；note 长推的 `richtext_tags` 入库并织进 `display_text`；库存 3 篇 article 已重取带样式 |
+| 本次 | 配图拼进 `display_text`（契约 1.8.0）：图片 `![](url)` 织入/追加，视频给可点击缩略图，正文里指向媒体的 t.co 残链清掉；article 不重复拼（配图已内嵌） |

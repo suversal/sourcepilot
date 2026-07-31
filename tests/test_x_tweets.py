@@ -431,7 +431,102 @@ class TestNoteRichtext:
         })
         assert text == "***abc***"
 
+    def test_inline_media_position_is_captured_and_shifted(self):
+        """note tweet 的行内图按 media_id 指到正文位置，随 strip 平移。"""
+        r = from_graphql(result(
+            legacy={"extended_entities": {"media": [
+                {"type": "photo", "id_str": "m1", "url": "https://t.co/pic",
+                 "media_url_https": "https://pbs.twimg.com/a.jpg"},
+            ]}},
+            note_tweet={"note_tweet_results": {"result": {
+                "text": "\n开头段落，图在这之后。结尾。",
+                "media": {"inline_media": [{"media_id": "m1", "index": 10}]},
+            }}},
+        ), NOW, NOW)
+        assert r.media[0]["inline_index"] == 9
+        assert r.media[0]["tco"] == "https://t.co/pic"
+
+
+class TestMediaInDisplayText:
+    """图片拼进 display_text——富文本正文自带配图，下游不用再对照 media 数组。"""
+
+    def _row(self, **over):
+        return {"text": "看这张图 https://t.co/pic", **over}
+
+    def test_photo_appended_and_tco_stripped(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields(self._row(media=[
+            {"type": "photo", "url": "https://pbs.twimg.com/a.jpg",
+             "thumbnail": "https://pbs.twimg.com/a.jpg", "tco": "https://t.co/pic"},
+        ]))
+        assert text == "看这张图\n\n![](https://pbs.twimg.com/a.jpg)"
+
+    def test_video_is_clickable_thumbnail(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields({"text": "视频", "media": [
+            {"type": "video", "url": "https://video.twimg.com/v.mp4",
+             "thumbnail": "https://pbs.twimg.com/thumb.jpg"},
+        ]})
+        assert text == "视频\n\n[![](https://pbs.twimg.com/thumb.jpg)](https://video.twimg.com/v.mp4)"
+
+    def test_inline_media_lands_mid_text(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields({"text": "上文。下文。", "media": [
+            {"type": "photo", "url": "https://pbs.twimg.com/a.jpg",
+             "thumbnail": "https://pbs.twimg.com/a.jpg", "inline_index": 3},
+        ]})
+        assert text == "上文。\n\n![](https://pbs.twimg.com/a.jpg)\n\n下文。"
+
+    def test_legacy_rows_without_tco_keep_text_untouched(self):
+        """老数据的 media 没存 tco——正文里的短链清不掉，原样保留不算错。"""
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields(self._row(media=[
+            {"type": "photo", "url": "https://pbs.twimg.com/a.jpg",
+             "thumbnail": "https://pbs.twimg.com/a.jpg"},
+        ]))
+        assert text == "看这张图 https://t.co/pic\n\n![](https://pbs.twimg.com/a.jpg)"
+
+    def test_article_does_not_get_media_appended(self):
+        """长文的配图已内嵌在 article_markdown，推文自身的封面预览不再拼一次。"""
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields({
+            "text": "长文入口", "has_article": True,
+            "article_title": "标题", "article_markdown": "# 正文",
+            "media": [{"type": "photo", "url": "https://pbs.twimg.com/cover.jpg",
+                       "thumbnail": "https://pbs.twimg.com/cover.jpg"}],
+        })
+        assert text == "# 正文"
+
+    def test_repost_carries_original_media(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields({
+            "text": "RT @a: 截断…", "is_retweet": True, "retweeted_text": "原文全文",
+            "media": [{"type": "photo", "url": "https://pbs.twimg.com/a.jpg",
+                       "thumbnail": "https://pbs.twimg.com/a.jpg"}],
+        })
+        assert text == "原文全文\n\n![](https://pbs.twimg.com/a.jpg)"
+
     def test_round_trip_through_store(self, store):
+        """media 的 tco/inline_index 经 JSON 列往返不丢，display_text 拼好图。"""
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            tweet_id="1", author_handle="a", text="看图 https://t.co/z",
+            fetched_at=NOW, created_at=NOW,
+            media=[{"type": "photo", "url": "https://pbs.twimg.com/a.jpg",
+                    "thumbnail": "https://pbs.twimg.com/a.jpg",
+                    "media_id": "m1", "tco": "https://t.co/z"}],
+        )])
+        (row,) = store.query_tweets(limit=10)
+        assert row["display_text"] == "看图\n\n![](https://pbs.twimg.com/a.jpg)"
+
+    def test_richtext_round_trip_through_store(self, store):
         """richtext_tags 经 JSON 列往返不丢，读出来的 display_text 已带标记。"""
         from sourcepilot.channels.x.tweet import TweetRecord
 
