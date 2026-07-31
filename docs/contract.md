@@ -1,4 +1,4 @@
-# SourcePilot · 工具契约 v1.6.0
+# SourcePilot · 工具契约 v1.7.0
 
 > 采集平台与一切消费方（AIRADAR / MCP 客户端 / Agent）之间的**唯一合同**。
 > REST、MCP、SKILL.md 三个出口共用本契约，只是协议壳不同。
@@ -44,7 +44,7 @@ REST 与 MCP 完全一致：
   "ok": true,
   "data": { /* 各工具自己的出参，见 §4 */ },
   "meta": {
-    "contract_version": "1.6.0",
+    "contract_version": "1.7.0",
     "mode": "live",              // live | cache | mixed | null(不涉及取数)
     "stale": false,              // true = 降级得到的近似结果，非实时
     "collected_at": "2026-07-25T10:03:00Z",  // 数据快照时间；现查时≈请求时间
@@ -478,6 +478,24 @@ article 只有 `preview_text`（约 100 字预览），正文必须单独一次�
 字段的话，同一个字段有时是原文截断、有时是机器概括，**下游没法判断手里是哪种**。
 `article_ai_summary` 为空是正常的——不是所有长文 X 都会生成摘要。
 两者都**不是全文**，全文只在 `article_markdown`。
+
+### 富文本样式（v1.7.0 新增）
+
+推文与长文里 X 原生支持的**加粗/斜体**不再被拍平：
+
+- **长文正文 `article_markdown`**：行内加粗/斜体转成 Markdown 强调标记
+  （`**` / `*`），与已有的标题层级、链接、配图一起构成完整样式。
+- **note tweet（>280 长推）**：X 把样式放在 `richtext_tags` 里，本平台
+  原样存下（字段形状：`[{from_index, to_index, richtext_types:["Bold"|"Italic"]}]`），
+  并在 `display_text` 里织成 Markdown。**`text` 字段保持纯文本不变**——
+  下标、子串匹配、去重都依赖它稳定；要带样式的正文一律用 `display_text`。
+- **普通短推没有富文本**：X 不支持，`richtext_tags` 恒为空数组。正文里
+  肉眼可见的「粗体字」是作者用 Unicode 数学字母硬拼的，那是字符不是样式，
+  原样保留。
+
+消费方约定：**`display_text` 自 v1.7.0 起可能含 Markdown 标记**（此前仅
+article 类如此，现在 longform 也会），渲染端统一按 Markdown 处理即可；
+纯文本场景（通知、去重、搜索索引）用 `text`。
 
 ### 两个维度：`tweet_type` 与 `content_kind`
 

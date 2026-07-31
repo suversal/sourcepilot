@@ -85,6 +85,13 @@ class TweetRecord:
     possibly_sensitive: bool = False
     source_client: str | None = None
 
+    #: note tweet（>280 长推）的富文本标记，X 原始形状：
+    #: [{"from_index", "to_index", "richtext_types": ["Bold"|"Italic", …]}]。
+    #: 存事实不存演绎——Markdown 版在读取时由 display_text 现算（同 content_kind
+    #: 的原则），规则要调时历史数据不会带着旧演绎。普通推文恒为空数组：
+    #: X 的短推正文不支持富文本。
+    richtext_tags: list[dict[str, Any]] = field(default_factory=list)
+
     #: 这条推文是不是一篇长文（X Articles）的入口。搜索与时间线只给得出这个
     #: 标记和摘要，**正文要单独一次请求**——见 GraphQLBackend.fetch_article。
     has_article: bool = False
@@ -195,8 +202,41 @@ def display_fields(row: dict[str, Any]) -> tuple[str, str]:
 
     text = row.get("text") or ""
     # 没有标题的推文取首行；首行过长就截断，别把整段塞进标题。
+    # 标题取自**无标记**的原文——`**` 混进标题只会碍事。
     first_line = text.strip().split("\n", 1)[0]
-    return (first_line[:60] or text[:60]), text
+    return (first_line[:60] or text[:60]), _styled_text(text, row.get("richtext_tags") or [])
+
+
+#: richtext_types 值 → Markdown 标记。与 article 侧一样按小写比对，
+#: X 的大小写习惯（`Bold`）不值得信赖。
+_RICHTEXT_MARK = {"bold": "**", "italic": "*"}
+
+
+def _styled_text(text: str, tags: list[dict[str, Any]]) -> str:
+    """把 note tweet 的富文本标记织成 Markdown。没有标记时原样返回。
+
+    一段区间可以同时是 Bold+Italic（types 是数组），嵌套地各套一层。
+    区间边缘的空白缩进去——`**x **` 不是合法强调，同 article 侧的处理。
+    """
+    if not tags:
+        return text
+    from .article import weave_spans  # 放函数内避免模块级循环引用
+
+    spans: list[tuple[int, int, str, str]] = []
+    for tag in tags:
+        start, end = tag.get("from_index"), tag.get("to_index")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        chunk = text[start:end]
+        stripped = chunk.strip()
+        if not stripped:
+            continue
+        start += len(chunk) - len(chunk.lstrip())
+        for kind in tag.get("richtext_types") or []:
+            mark = _RICHTEXT_MARK.get(str(kind).lower())
+            if mark:
+                spans.append((start, len(stripped), mark, mark))
+    return weave_spans(text, spans) if spans else text
 
 
 def _media_entries(legacy: dict[str, Any]) -> list[dict[str, str]]:
@@ -272,9 +312,26 @@ def from_graphql(
 
     # 长推文的全文在 note_tweet 里，legacy.full_text 是被截断的。
     note = ((result.get("note_tweet") or {}).get("note_tweet_results") or {}).get("result") or {}
-    text = (note.get("text") or legacy.get("full_text") or "").strip()
+    raw_text = note.get("text") or legacy.get("full_text") or ""
+    text = raw_text.strip()
     if not text:
         return None
+
+    # 富文本标记的下标指向**未 strip 的** note 正文；上面剥掉了首部空白，
+    # 下标就得跟着平移，否则整套标记向右错一段。
+    richtext_tags: list[dict[str, Any]] = []
+    if note.get("text"):
+        lead = len(raw_text) - len(raw_text.lstrip())
+        for tag in ((note.get("richtext") or {}).get("richtext_tags") or []):
+            start, end = _int(tag.get("from_index")), _int(tag.get("to_index"))
+            kinds = [str(k) for k in (tag.get("richtext_types") or [])]
+            if start is None or end is None or not kinds:
+                continue
+            start, end = max(start - lead, 0), min(end - lead, len(text))
+            if end > start:
+                richtext_tags.append(
+                    {"from_index": start, "to_index": end, "richtext_types": kinds}
+                )
 
     entities = legacy.get("entities") or {}
     article = ((result.get("article") or {}).get("article_results") or {}).get("result") or {}
@@ -331,6 +388,7 @@ def from_graphql(
         media=_media_entries(legacy),
         possibly_sensitive=bool(legacy.get("possibly_sensitive")),
         source_client=source_match.group(1) if source_match else None,
+        richtext_tags=richtext_tags,
         has_article=bool(article),
         article_id=(article.get("rest_id") if article else None),
         article_title=(article.get("title") if article else None),

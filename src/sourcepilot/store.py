@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS x_tweets (
     hashtags           TEXT NOT NULL DEFAULT '[]',
     mentions           TEXT NOT NULL DEFAULT '[]',
     media              TEXT NOT NULL DEFAULT '[]',
+    -- note tweet 的富文本标记（X 原始形状的 JSON 数组）。存事实不存演绎：
+    -- Markdown 版由 display_text 读取时现算，见 tweet.py。
+    richtext_tags      TEXT NOT NULL DEFAULT '[]',
     possibly_sensitive INTEGER NOT NULL DEFAULT 0,
     source_client      TEXT,
     -- X 长文（Articles）。推文本身只是个入口，正文在这里。
@@ -201,6 +204,7 @@ class Store:
                 ("article_summary", "TEXT"),
                 ("article_ai_summary", "TEXT"),
                 ("article_cover", "TEXT"),
+                ("richtext_tags", "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if col not in tweet_cols:
                     conn.execute(f"ALTER TABLE x_tweets ADD COLUMN {col} {decl}")
@@ -285,7 +289,7 @@ class Store:
         "quoted_tweet_id", "quoted_handle", "quoted_text",
         "is_retweet", "retweeted_tweet_id", "retweeted_handle", "retweeted_text",
         "urls", "hashtags",
-        "mentions", "media", "possibly_sensitive", "source_client",
+        "mentions", "media", "richtext_tags", "possibly_sensitive", "source_client",
         "has_article", "article_id", "article_title", "article_markdown",
         "article_summary", "article_ai_summary", "article_cover", "fetched_at",
     )
@@ -306,6 +310,7 @@ class Store:
                 json.dumps(r.hashtags, ensure_ascii=False),
                 json.dumps(r.mentions, ensure_ascii=False),
                 json.dumps(r.media, ensure_ascii=False),
+                json.dumps(r.richtext_tags, ensure_ascii=False),
                 int(r.possibly_sensitive), r.source_client,
                 int(r.has_article), r.article_id, r.article_title, r.article_markdown,
                 r.article_summary, r.article_ai_summary, r.article_cover, _iso(r.fetched_at),
@@ -649,8 +654,8 @@ def _row_to_item(row: sqlite3.Row) -> Item:
 
 def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
-    for key in ("urls", "hashtags", "mentions", "media"):
-        d[key] = json.loads(d[key] or "[]")
+    for key in ("urls", "hashtags", "mentions", "media", "richtext_tags"):
+        d[key] = json.loads(d.get(key) or "[]")
     for key in ("author_verified", "is_reply", "is_quote", "is_retweet",
                 "possibly_sensitive", "has_article"):
         d[key] = bool(d[key])

@@ -325,6 +325,128 @@ class TestArticleMarkdown:
         assert parse({"rest_id": "9", "content_state": {"blocks": []}, "plain_text": ""}) is None
 
 
+class TestInlineStyles:
+    """行内加粗/斜体在 inlineStyleRanges 里。
+
+    实测 X 给的 style 值是 `Bold` 这种首字母大写，不是 Draft.js 文档里的
+    全大写 `BOLD`——两种都得认。
+    """
+
+    def _md(self, blocks, entity_map=None):
+        from sourcepilot.channels.x.article import to_markdown
+
+        return to_markdown({"blocks": blocks, "entityMap": entity_map or {}})
+
+    def test_bold_is_woven_in(self):
+        md = self._md([{"type": "unstyled", "text": "重点内容在此",
+                        "inlineStyleRanges": [{"offset": 0, "length": 2, "style": "Bold"}]}])
+        assert md == "**重点**内容在此"
+
+    def test_style_case_is_forgiven(self):
+        for style in ("Bold", "BOLD", "bold"):
+            md = self._md([{"type": "unstyled", "text": "AB",
+                            "inlineStyleRanges": [{"offset": 0, "length": 2, "style": style}]}])
+            assert md == "**AB**", style
+
+    def test_italic(self):
+        md = self._md([{"type": "unstyled", "text": "强调词",
+                        "inlineStyleRanges": [{"offset": 0, "length": 3, "style": "Italic"}]}])
+        assert md == "*强调词*"
+
+    def test_bold_link_nests_instead_of_crossing(self):
+        """加粗的链接：两个区间重合，标记必须嵌套而不是交叉。"""
+        md = self._md(
+            [{"type": "unstyled", "text": "AAA",
+              "entityRanges": [{"offset": 0, "length": 3, "key": "0"}],
+              "inlineStyleRanges": [{"offset": 0, "length": 3, "style": "Bold"}]}],
+            {"0": {"type": "LINK", "data": {"url": "https://1"}}},
+        )
+        assert md == "**[AAA](https://1)**"
+
+    def test_edge_whitespace_is_tucked_inside(self):
+        """`**加粗 **` 不是合法的 Markdown 强调——边缘空白要缩进区间里。"""
+        md = self._md([{"type": "unstyled", "text": "AB cd",
+                        "inlineStyleRanges": [{"offset": 0, "length": 3, "style": "Bold"}]}])
+        assert md == "**AB** cd"
+
+    def test_code_block_keeps_literal_asterisks(self):
+        """代码块里的星号是字面内容，不套强调。"""
+        md = self._md([{"type": "code-block", "text": "a = b",
+                        "inlineStyleRanges": [{"offset": 0, "length": 5, "style": "Bold"}]}])
+        assert md == "    a = b"
+
+
+class TestNoteRichtext:
+    """note tweet（>280 长推）的加粗/斜体在 note_tweet.richtext.richtext_tags 里。
+
+    存的是 X 原始形状的事实，Markdown 版由 display_text 读取时现算——
+    同 content_kind 的原则，规则要调时历史数据不会带着旧演绎。
+    """
+
+    def _note(self, text, tags):
+        return result(note_tweet={"note_tweet_results": {"result": {
+            "text": text, "richtext": {"richtext_tags": tags}}}})
+
+    def test_tags_are_captured(self):
+        r = from_graphql(self._note(
+            "长文开头，重点在后面" + "填充" * 140,
+            [{"from_index": 5, "to_index": 7, "richtext_types": ["Bold"]}],
+        ), NOW, NOW)
+        assert r.richtext_tags == [
+            {"from_index": 5, "to_index": 7, "richtext_types": ["Bold"]}
+        ]
+
+    def test_indices_shift_with_leading_strip(self):
+        """正文入库前 strip 过，标记下标指向未 strip 的原文——必须跟着平移。"""
+        r = from_graphql(self._note(
+            "\n\n重点在开头",
+            [{"from_index": 2, "to_index": 4, "richtext_types": ["Bold"]}],
+        ), NOW, NOW)
+        assert r.richtext_tags == [
+            {"from_index": 0, "to_index": 2, "richtext_types": ["Bold"]}
+        ]
+        assert r.text[0:2] == "重点"
+
+    def test_short_tweet_has_no_tags(self):
+        assert from_graphql(result(), NOW, NOW).richtext_tags == []
+
+    def test_display_text_weaves_markdown_but_title_stays_clean(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        title, text = display_fields({
+            "text": "重点内容在此",
+            "richtext_tags": [{"from_index": 0, "to_index": 2,
+                               "richtext_types": ["Bold"]}],
+        })
+        assert text == "**重点**内容在此"
+        assert title == "重点内容在此"
+
+    def test_bold_italic_combo_nests(self):
+        from sourcepilot.channels.x.tweet import display_fields
+
+        _, text = display_fields({
+            "text": "abc",
+            "richtext_tags": [{"from_index": 0, "to_index": 3,
+                               "richtext_types": ["Bold", "Italic"]}],
+        })
+        assert text == "***abc***"
+
+    def test_round_trip_through_store(self, store):
+        """richtext_tags 经 JSON 列往返不丢，读出来的 display_text 已带标记。"""
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        store.upsert_tweets([TweetRecord(
+            tweet_id="1", author_handle="a", text="重点内容在此", fetched_at=NOW,
+            created_at=NOW,
+            richtext_tags=[{"from_index": 0, "to_index": 2, "richtext_types": ["Bold"]}],
+        )])
+        (row,) = store.query_tweets(limit=10)
+        assert row["richtext_tags"] == [
+            {"from_index": 0, "to_index": 2, "richtext_types": ["Bold"]}
+        ]
+        assert row["display_text"] == "**重点**内容在此"
+
+
 class TestArticleIsFlaggedButNotFetchedInline:
     """搜索与时间线返回的 article 只有预览，正文要单独一次请求。"""
 

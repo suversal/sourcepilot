@@ -8,7 +8,9 @@ X 的长文不是推文——推文里只挂一个 article 实体，正文在 `c
 **为什么转 Markdown 而不是直接用 `plain_text`**：X 同时给了纯文本版，但那一版
 把二级标题和正文段落拍平成同样的行，链接也只剩锚文本——下游拿到的是一堆看不出
 结构的段落。而 Draft.js 里标题、链接、加粗都在，转成 Markdown 后展示端能直接渲染。
-`plain_text` 保留作兜底：结构解析失败时它总比没有强。
+块级结构走 `_BLOCK_PREFIX`，行内加粗/斜体走 `inlineStyleRanges`（实测 X 的
+style 值是 `Bold` 这种首字母大写）。`plain_text` 保留作兜底：结构解析失败时
+它总比没有强。
 """
 
 from __future__ import annotations
@@ -41,12 +43,58 @@ def _entity_map(raw: Any) -> dict[str, dict[str, Any]]:
     return {}
 
 
-def _apply_links(text: str, ranges: list[dict], entities: dict[str, dict]) -> str:
-    """把链接实体套回文本，产出 Markdown 链接。
+#: 行内样式 → Markdown 标记。实测 X 给的值是 `Bold` 这种首字母大写，
+#: 不是 Draft.js 文档里的全大写 `BOLD`——两种都认，免得对方哪天又改回去。
+_INLINE_MARK = {"bold": "**", "italic": "*"}
 
-    从后往前替换——每次替换都会改变字符串长度，从前往后做的话后面所有
-    offset 就全错位了。
+
+def weave_spans(text: str, spans: list[tuple[int, int, str, str]]) -> str:
+    """把若干 (offset, length, 前缀, 后缀) 区间编织进文本。
+
+    不能逐个切片替换：链接和加粗可以嵌套（加粗的链接），外层区间的终点
+    会被内层插入的标记推移，按原始坐标切片就错位了。所以改成收集全部
+    插入点、按位置从后往前逐个插——每次插入只影响它右边的内容，而右边
+    的都已经插完了。
+
+    同一位置的处理顺序决定嵌套是否正确（后插入的排在更左边）：
+    先开启后关闭 → 关闭标记落在开启标记左边（相邻区间不粘连）；
+    开启之间先内后外、关闭之间先外后内 → 嵌套区间产出 `**[x](url)**`
+    而不是交叉的 `**[x**](url)`。起止完全相同的两个区间（加粗的链接）
+    没有天然的内外之分，取列表顺序：**后加入的套在外面**——to_markdown
+    先加链接后加样式，于是样式在外，链接结构不被拆散。
     """
+    inserts: list[tuple[int, int, tuple[int, int], str]] = []
+    for seq, (offset, length, prefix, suffix) in enumerate(spans):
+        inserts.append((offset, 0, (length, seq), prefix))
+        inserts.append((offset + length, 1, (offset, -seq), suffix))
+    inserts.sort(key=lambda t: (-t[0], t[1], t[2]))
+    for pos, _, _, marker in inserts:
+        text = f"{text[:pos]}{marker}{text[pos:]}"
+    return text
+
+
+def _style_spans(text: str, ranges: list[dict]) -> list[tuple[int, int, str, str]]:
+    """inlineStyleRanges → 编织区间。
+
+    区间边缘的空白要缩进去：`**加粗 **` 不是合法的 Markdown 强调，
+    渲染器会原样吐出星号。
+    """
+    spans = []
+    for r in ranges or []:
+        mark = _INLINE_MARK.get(str(r.get("style") or "").lower())
+        offset, length = r.get("offset"), r.get("length")
+        if not mark or not isinstance(offset, int) or not isinstance(length, int):
+            continue
+        chunk = text[offset : offset + length]
+        stripped = chunk.strip()
+        if not stripped:
+            continue
+        offset += len(chunk) - len(chunk.lstrip())
+        spans.append((offset, len(stripped), mark, mark))
+    return spans
+
+
+def _link_spans(ranges: list[dict], entities: dict[str, dict]) -> list[tuple[int, int, str, str]]:
     spans = []
     for r in ranges or []:
         entity = entities.get(str(r.get("key")))
@@ -55,12 +103,8 @@ def _apply_links(text: str, ranges: list[dict], entities: dict[str, dict]) -> st
         url = (entity.get("data") or {}).get("url")
         offset, length = r.get("offset"), r.get("length")
         if url and isinstance(offset, int) and isinstance(length, int):
-            spans.append((offset, length, url))
-
-    for offset, length, url in sorted(spans, key=lambda s: s[0], reverse=True):
-        anchor = text[offset : offset + length]
-        text = f"{text[:offset]}[{anchor}]({url}){text[offset + length:]}"
-    return text
+            spans.append((offset, length, "[", f"]({url})"))
+    return spans
 
 
 def _media_url(block: dict, entities: dict[str, dict]) -> str | None:
@@ -99,7 +143,11 @@ def to_markdown(content_state: dict[str, Any], media_urls: dict[str, str] | None
         text = block.get("text") or ""
         if not text.strip():
             continue
-        text = _apply_links(text, block.get("entityRanges") or [], entities)
+        spans = _link_spans(block.get("entityRanges") or [], entities)
+        # 代码块里不套强调标记——那里的星号是字面内容。
+        if kind != "code-block":
+            spans += _style_spans(text, block.get("inlineStyleRanges") or [])
+        text = weave_spans(text, spans)
         lines.append(f"{_BLOCK_PREFIX.get(kind, '')}{text}")
 
     return "\n\n".join(lines)
