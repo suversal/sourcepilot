@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import time
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from urllib.parse import urlsplit
 import httpx
 import trafilatura
 
+from . import htmlmd
 from .contracts import (
     Article,
     BadRequest,
@@ -27,6 +29,8 @@ from .contracts import (
     UpstreamDown,
 )
 from .settings import DEFAULT_UA
+
+log = logging.getLogger("sourcepilot.article")
 
 #: 只允许普通网页端口。挡住 redis(6379)、mysql(3306) 这类「用 HTTP 探内网服务」的玩法。
 ALLOWED_PORTS = frozenset({80, 443, 8080, 8443})
@@ -71,6 +75,22 @@ def assert_public_url(url: str) -> None:
     if not _is_public_ip(parts.hostname):
         # 不告诉调用方「这是内网地址」——那本身就是一条内网探测的反馈信号。
         raise BadRequest("目标地址不可达或不被允许")
+
+
+#: 正文容器已知的站点：域名后缀 → CSS 选择器。
+#: 只在通用提取器明显做不好时才加一条——每一条都是要跟着对方改版维护的。
+SITE_CONTAINERS: dict[str, str] = {
+    # 公众号的正文恒在这个 id 里，多年没变。
+    "mp.weixin.qq.com": "#js_content",
+}
+
+
+def _container_selector(url: str) -> str | None:
+    host = (urlsplit(url).hostname or "").lower()
+    for domain, selector in SITE_CONTAINERS.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return selector
+    return None
 
 
 class ArticleService:
@@ -126,7 +146,18 @@ class ArticleService:
 
         html, final_url = self._fetch(url)
 
-        markdown = trafilatura.extract(
+        # 正文容器已知的站点走专用提取。trafilatura 擅长「猜正文在哪」，
+        # 代价是激进降噪——实测公众号那篇 5360 字正文提得很干净，但 6 张配图
+        # 和 4 个小标题全被当噪音丢了。容器已知就不必承担猜错的代价。
+        markdown = None
+        selector = _container_selector(final_url)
+        if selector:
+            markdown = htmlmd.extract(html, selector)
+            if not markdown:
+                # 站点改版把容器改名了。回落到通用提取，宁可少格式也别整个失败。
+                log.warning("%s 的正文容器 %s 没选中，回落 trafilatura", final_url, selector)
+
+        markdown = markdown or trafilatura.extract(
             html,
             output_format="markdown",
             include_links=True,
