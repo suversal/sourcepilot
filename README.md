@@ -150,6 +150,11 @@ DeepSeek · 昆仑万维 · 智源研究院 · 商汤科技 · 量子位 · 机�
 
 走公众平台后台接口，需自行配置凭据（见 [wechat.yaml](config/sources/wechat.yaml) 文件头）。
 
+凭据自检：`python -m sourcepilot.channels.wechat.check`。它**两个接口都打**——
+公众平台按接口分别限流，实测出现过 `searchbiz` 返回 `ret: 0` 而 `appmsg`
+同时是 `200013 freq control` 的情况。只验证搜索接口会得出「凭据没问题」的
+错误结论，而采集走的恰恰是 `appmsg`。
+
 ### X / Twitter（`source=x`）
 
 时间线定时采集 + 按需现场搜索。

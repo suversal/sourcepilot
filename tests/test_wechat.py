@@ -527,3 +527,45 @@ class TestAccountsAcceptFakeid:
             ChannelAccount(name="火山引擎", fakeid="FID", alias="volcengine"), 5
         )
         assert seen["fakeid"] == "FID"
+
+
+class TestCredentialCheckUsesTheRealEndpoint:
+    """公众平台**按接口分别限流**，验证凭据必须打采集真正用的那个。
+
+    实测撞到过：searchbiz 返回 ret=0（看着一切正常），appmsg 同时返回
+    200013 freq control——而采集走的是 appmsg。只验证前者会得出「凭据没问题」
+    的错误结论，然后继续困惑为什么采集一直失败。
+    """
+
+    def _creds(self, tmp_path, monkeypatch):
+        from sourcepilot.channels.wechat import check as check_mod
+
+        path = tmp_path / "cred.yaml"
+        path.write_text("token: '123'\ncookie: 'a=b'\n", encoding="utf-8")
+        monkeypatch.setattr(check_mod, "CREDENTIALS_FILE", path)
+        return check_mod
+
+    def test_probes_both_endpoints(self, tmp_path, monkeypatch):
+        mod = self._creds(tmp_path, monkeypatch)
+        hit = []
+        monkeypatch.setattr(mod, "_call", lambda url, p, c: hit.append(url) or {"ret": 0})
+        mod.check()
+        assert any("appmsg" in u for u in hit), "必须打采集真正用的接口"
+        assert any("searchbiz" in u for u in hit)
+
+    def test_rate_limit_is_not_the_same_as_bad_credentials(self, tmp_path, monkeypatch):
+        """限流时凭据是好的——报成「要换凭据」会让人白折腾一遍登录。"""
+        mod = self._creds(tmp_path, monkeypatch)
+        monkeypatch.setattr(mod, "_call", lambda url, p, c: {"ret": 200013})
+        assert mod.check() == 1  # 1 = 受限，2 才是凭据失效
+
+    def test_invalid_session_is_reported_as_fatal(self, tmp_path, monkeypatch):
+        mod = self._creds(tmp_path, monkeypatch)
+        monkeypatch.setattr(mod, "_call", lambda url, p, c: {"ret": 200003})
+        assert mod.check() == 2
+
+    def test_missing_credentials_file(self, tmp_path, monkeypatch):
+        from sourcepilot.channels.wechat import check as check_mod
+
+        monkeypatch.setattr(check_mod, "CREDENTIALS_FILE", tmp_path / "nope.yaml")
+        assert check_mod.check() == 1

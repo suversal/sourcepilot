@@ -22,6 +22,12 @@
 #
 #   拿到凭据后把下面 enabled 改成 true，填上要订阅的公众号名。
 #
+# 验证凭据：python -m sourcepilot.channels.wechat.check
+#   它**两个接口都打**。公众平台按接口分别限流，实测出现过 searchbiz 正常
+#   而 appmsg 返回 200013 freq control 的情况——只验证搜索接口会得出
+#   「凭据没问题」的错误结论，而采集走的恰恰是 appmsg。
+#   看到 200013 时不要反复重试，那正是把额度耗光的原因。
+#
 # 这块是全平台最可能被官方封的一条线，所以整块隔离在 channels/wechat.py，
 # 坏了整块换掉，不牵动其它信源。
 name: wechat
