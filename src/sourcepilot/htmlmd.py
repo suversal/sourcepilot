@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 #: 块级标签 → Markdown 前缀。
@@ -29,6 +31,13 @@ _INLINE_MARK = {
     "code": "`", "del": "~~", "s": "~~",
 }
 
+#: 懒加载属性，按优先级。站点各用各的，只认 src 的话图片会整批丢失
+#: ——公众号 6 张配图全部只有 data-src，src 属性根本不存在。
+LAZY_ATTRS = (
+    "data-original", "data-src", "data-lazy-src",
+    "data-actualsrc", "data-echo", "data-url", "src",
+)
+
 #: 整棵子树都不要的标签。
 _DROP = {"script", "style", "noscript", "iframe", "svg", "form", "button", "input"}
 
@@ -40,10 +49,22 @@ def _image_src(tag: Tag) -> str | None:
     占位图——公众号就是这样，6 张配图全部只有 `data-src`。按优先级挨个找，
     找不到就当这张图不存在（宁可少一张，不要一个坏链接）。
     """
-    for attr in ("data-src", "data-original", "data-actualsrc", "src"):
+    for attr in LAZY_ATTRS:
         value = (tag.get(attr) or "").strip()
         if value and not value.startswith("data:"):  # data: 是内联占位图
             return value
+
+    # <picture><source srcset> 是响应式图片的标准写法，img 那层往往只有占位。
+    picture = tag.find_parent("picture")
+    if picture is not None:
+        for source in picture.find_all("source"):
+            for attr in ("data-srcset", "srcset"):
+                value = (source.get(attr) or "").strip()
+                if value:
+                    # srcset 是 "url 1x, url2 2x" 的列表，取第一个。
+                    first = value.split(",")[0].strip().split(" ")[0]
+                    if first and not first.startswith("data:"):
+                        return first
     return None
 
 
@@ -127,6 +148,15 @@ def _walk(node: Tag, lines: list[str], list_prefix: str | None = None) -> None:
 
         name = child.name
 
+        if name == "img":
+            # 不在任何块级容器里的裸图。`<picture><source><img>` 就是这种形状
+            # ——注意 source 是自闭合标签，解析器会把 img 挂成它的子节点，
+            # 所以下钻到任意深度都可能撞见一个孤零零的 img。
+            src = _image_src(child)
+            if src:
+                lines.append(f"![]({src})")
+            continue
+
         if name in ("ul", "ol"):
             ordered = name == "ol"
             for index, li in enumerate(child.find_all("li", recursive=False), start=1):
@@ -203,10 +233,34 @@ def to_markdown(container: Tag) -> str:
     return "\n\n".join(deduped).strip()
 
 
-def extract(html: str, selector: str) -> str | None:
-    """按选择器取出容器并转 Markdown。选不中返回 None，让调用方回落。"""
-    container = BeautifulSoup(html, "lxml").select_one(selector)
+def extract(
+    html: str,
+    selectors: str | Sequence[str],
+    exclude: Sequence[str] = (),
+) -> str | None:
+    """按选择器取出容器并转 Markdown。选不中返回 None，让调用方回落。
+
+    `selectors` 可以给多个候选，按顺序试第一个命中的——站点改版时常常是
+    换个类名而不是整个重构，多备一个就不至于直接掉回通用提取。
+
+    `exclude` 在容器**内部**再删掉一批节点：文末的「阅读原文」「赞赏码」、
+    浮动目录这些在正文容器里，但不是正文。
+    """
+    if isinstance(selectors, str):
+        selectors = [selectors]
+
+    soup = BeautifulSoup(html, "lxml")
+    container = None
+    for selector in selectors:
+        container = soup.select_one(selector)
+        if container is not None:
+            break
     if container is None:
         return None
+
+    for selector in exclude:
+        for node in container.select(selector):
+            node.decompose()
+
     markdown = to_markdown(container)
     return markdown or None

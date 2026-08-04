@@ -10,6 +10,7 @@ import ipaddress
 import logging
 import socket
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -77,19 +78,43 @@ def assert_public_url(url: str) -> None:
         raise BadRequest("目标地址不可达或不被允许")
 
 
-#: 正文容器已知的站点：域名后缀 → CSS 选择器。
-#: 只在通用提取器明显做不好时才加一条——每一条都是要跟着对方改版维护的。
-SITE_CONTAINERS: dict[str, str] = {
-    # 公众号的正文恒在这个 id 里，多年没变。
-    "mp.weixin.qq.com": "#js_content",
-}
+@dataclass(frozen=True)
+class SiteProfile:
+    """正文容器已知的站点。
+
+    只在通用提取器明显做不好时才加一条——每一条都是要跟着对方改版维护的。
+    """
+
+    hosts: tuple[str, ...]
+    #: 容器候选，按顺序试第一个命中的。备一个是因为站点改版常常只是换类名。
+    roots: tuple[str, ...]
+    #: 容器内部要删掉的节点：文末推广、赞赏码、浮动目录——在正文里但不是正文。
+    exclude: tuple[str, ...] = ()
 
 
-def _container_selector(url: str) -> str | None:
+SITE_PROFILES: tuple[SiteProfile, ...] = (
+    SiteProfile(
+        hosts=("mp.weixin.qq.com",),
+        # 这个 id 多年没变；rich_media_content 是它的类名，作备胎。
+        roots=("#js_content", ".rich_media_content"),
+        exclude=(
+            "#js_pc_qr_code",          # 公众号二维码
+            ".rich_media_tool",        # 底部工具条
+            ".reward_area",            # 赞赏
+            ".qr_code_pc",
+            "#js_sponsor_ad_area",     # 广告位
+            "mpprofile",               # 内嵌的「公众号名片」卡片
+            ".js_uneditable",          # 小程序/视频号卡片，抽出来是一串占位字
+        ),
+    ),
+)
+
+
+def _profile_for(url: str) -> SiteProfile | None:
     host = (urlsplit(url).hostname or "").lower()
-    for domain, selector in SITE_CONTAINERS.items():
-        if host == domain or host.endswith(f".{domain}"):
-            return selector
+    for profile in SITE_PROFILES:
+        if any(host == h or host.endswith(f".{h}") for h in profile.hosts):
+            return profile
     return None
 
 
@@ -150,12 +175,12 @@ class ArticleService:
         # 代价是激进降噪——实测公众号那篇 5360 字正文提得很干净，但 6 张配图
         # 和 4 个小标题全被当噪音丢了。容器已知就不必承担猜错的代价。
         markdown = None
-        selector = _container_selector(final_url)
-        if selector:
-            markdown = htmlmd.extract(html, selector)
+        profile = _profile_for(final_url)
+        if profile:
+            markdown = htmlmd.extract(html, profile.roots, profile.exclude)
             if not markdown:
-                # 站点改版把容器改名了。回落到通用提取，宁可少格式也别整个失败。
-                log.warning("%s 的正文容器 %s 没选中，回落 trafilatura", final_url, selector)
+                # 站点改版把容器全改名了。回落到通用提取，宁可少格式也别整个失败。
+                log.warning("%s 的正文容器都没选中，回落 trafilatura", final_url)
 
         markdown = markdown or trafilatura.extract(
             html,

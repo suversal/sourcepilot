@@ -102,3 +102,28 @@ class TestFallback:
     def test_nested_list_is_indented(self):
         out = md("<ul><li>甲<ul><li>甲一</li></ul></li></ul>")
         assert out == "- 甲\n\n  - 甲一"
+
+
+class TestSiteProfileCapabilities:
+    """对齐 AIRADAR 的 ContentProfile：多候选选择器、排除节点、更全的懒加载属性。"""
+
+    def test_falls_through_to_the_next_selector(self):
+        """站点改版常常只是换个类名，备一个候选就不至于掉回通用提取。"""
+        html = '<html><body><div class="alt">正文</div></body></html>'
+        assert extract(html, ["#gone", ".alt"]) == "正文"
+
+    def test_exclude_removes_nodes_inside_the_container(self):
+        """文末的赞赏码、二维码在正文容器里，但不是正文。"""
+        html = WRAP.format('<p>正文</p><div class="reward_area">赞赏</div>')
+        assert extract(html, "#c", exclude=[".reward_area"]) == "正文"
+
+    def test_all_lazy_attributes(self):
+        for attr in ("data-original", "data-src", "data-lazy-src",
+                     "data-actualsrc", "data-echo", "data-url"):
+            assert md(f'<p><img {attr}="https://i/x.jpg"></p>') == "![](https://i/x.jpg)", attr
+
+    def test_picture_srcset(self):
+        """响应式图片的真实地址在 <source srcset>，img 那层往往只有占位。"""
+        out = md('<picture><source srcset="https://i/big.webp 2x">'
+                 '<img src="data:image/gif;base64,R0lGOD"></picture>')
+        assert out == "![](https://i/big.webp)"
