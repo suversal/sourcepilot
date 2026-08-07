@@ -52,6 +52,7 @@ import yaml
 
 from ...contracts import (
     AuthExpired,
+    Captcha,
     Item,
     RateLimited,
     Source,
@@ -160,6 +161,9 @@ class WereadClient:
         self.timeout = timeout
         self._shelf: dict[str, str] | None = None
         self._shelf_error: SourcePilotError | None = None
+        #: 本轮是否已经成功换到过阅读器页通行证。换到了还被 -2041 拒，
+        #: 说明问题不在 Referer 而在风控。
+        self._ticket_confirmed = False
 
     def _headers(self, referer: str = WEREAD_BASE) -> dict[str, str]:
         return {
@@ -190,6 +194,14 @@ class WereadClient:
                 "微信读书返回的不是 JSON——多半触发了风控，停手等几小时"
             ) from exc
 
+        return self._check(payload)
+
+
+    def _check(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """把响应体里的业务错误码翻成结构化错误。
+
+        微信读书和公众平台一样：HTTP 200，真状态在 body 里。
+        """
         err = payload.get("errCode")
         if err in _AUTH_ERRORS:
             # 日志里说清楚怎么修（运维看得到），对外只说平台侧不可用（契约 §5：
@@ -202,6 +214,22 @@ class WereadClient:
             )
             raise AuthExpired("公众号采集暂不可用")
         if err == ERR_CONTEXT_REQUIRED:
+            # -2041 有两种成因，处理方式完全相反：
+            #   ① Referer 不是合法阅读器页 → 换张通行证就好
+            #   ② 触发了人机验证          → 换证也没用，得人去浏览器过验证
+            #
+            # 判据是**本轮有没有成功换到通行证**：换到了还被拒，就不是 Referer
+            # 的问题。实测过一次全量失败（书架正常、24 个号的通行证都换到了，
+            # 拉文章全 -2041），登录网页一看是弹了图片验证码。
+            #
+            # 这个区分不是学术性的：报 UPSTREAM_DOWN 的话它不属于后端级失败，
+            # 24 个号会各撞一次；报 CAPTCHA 才会第一个失败就冷却整个后端
+            # ——而那正是「再捅就要出事」的信号。
+            if self._ticket_confirmed:
+                raise Captcha(
+                    "微信读书触发了人机验证：请登录 weread.qq.com 完成验证，"
+                    "之后重新复制 Cookie 到 config/weread_credentials.yaml"
+                )
             raise UpstreamDown(
                 "微信读书拒绝了请求上下文（-2041）：阅读器页地址可能已失效，"
                 "下一轮会重新同步书架"
@@ -223,6 +251,9 @@ class WereadClient:
                 "微信读书书架里一个公众号都没有，换不到阅读器页通行证。"
                 "在微信里打开任意一个公众号的文章 → 分享 → 在微信读书中阅读，加一个即可"
             )
+        # 书架读得到就说明登录态有效、通行证是合法的阅读器页——之后再被
+        # -2041 拒就不是 Referer 的问题了。
+        self._ticket_confirmed = True
         return next(iter(shelf.values()))
 
     def shelf(self) -> dict[str, str]:

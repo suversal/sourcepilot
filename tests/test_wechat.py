@@ -605,3 +605,43 @@ class TestCredentialCheckUsesTheRealEndpoint:
 
         monkeypatch.setattr(check_mod, "CREDENTIALS_FILE", tmp_path / "nope.yaml")
         assert check_mod.check() == 1
+
+
+class TestCaptchaIsNotUpstreamDown:
+    """`-2041` 有两种成因，处理方式相反。
+
+    实测撞到过：书架接口正常、24 个号的通行证都换到了，拉文章却全部 -2041
+    ——登录网页一看是弹了图片验证码。报成 UPSTREAM_DOWN 的话它不属于后端级
+    失败，24 个号会各撞一次风控接口；报 CAPTCHA 才会第一个失败就冷却整个后端。
+    """
+
+    def _client(self):
+        from sourcepilot.channels.wechat.weread import WereadClient, WereadCredentials
+
+        return WereadClient(WereadCredentials(cookie="wr_vid=1; wr_skey=abc"))
+
+    def test_context_error_before_ticket_is_upstream_down(self):
+        """还没换到通行证时，-2041 就是字面意思：Referer 不对。"""
+        from sourcepilot.contracts import UpstreamDown
+
+        client = self._client()
+        with pytest.raises(UpstreamDown):
+            client._check({"errCode": -2041})
+
+    def test_context_error_after_ticket_is_captcha(self):
+        """通行证换到了还被拒——问题不在 Referer，在风控。"""
+        from sourcepilot.contracts import Captcha
+
+        client = self._client()
+        client._ticket_confirmed = True
+        with pytest.raises(Captcha) as exc:
+            client._check({"errCode": -2041})
+        assert "验证" in str(exc.value), "要告诉人去哪做什么"
+
+    def test_captcha_cools_down_the_whole_backend(self):
+        """这是这次修改的实际目的：别让 24 个号各撞一次。"""
+        from sourcepilot.channels.cooldown import BACKEND_LEVEL_FAILURES
+        from sourcepilot.contracts import ErrorCode
+
+        assert ErrorCode.CAPTCHA in BACKEND_LEVEL_FAILURES
+        assert ErrorCode.UPSTREAM_DOWN not in BACKEND_LEVEL_FAILURES

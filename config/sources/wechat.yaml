@@ -99,6 +99,11 @@
 #
 #   拿到凭据后把下面 enabled 改成 true，填上要订阅的公众号名。
 #
+# 查 fakeid：python -m sourcepilot.channels.wechat.biz <公众号文章链接>
+#   分享出来的短链（/s/xxxx）里没有 __biz，它只在页面 HTML 里，这个工具替你解。
+#   它同时报出**公众号名**与**本篇作者**——两者不同名时会显式标出来，
+#   因为那正是最容易配错的情形（「岩岩」写的文章发在「千问AI平台」上）。
+#
 # 验证凭据：python -m sourcepilot.channels.wechat.check
 #   它**两个接口都打**。公众平台按接口分别限流，实测出现过 searchbiz 正常
 #   而 appmsg 返回 200013 freq control 的情况——只验证搜索接口会得出
@@ -164,22 +169,25 @@ accounts:
   - { name: 月之暗面 Kimi,     fakeid: Mzk0NDU1MDkyNg== }
   - { name: 千问大模型,        fakeid: Mzk0ODg4NDI5NA== }
   - { name: 通义实验室,        fakeid: MzkxMTYyMTAzNA==, alias: AlibabaTongYiQianWen }
-  - { name: 零一万物 01AI,     fakeid: Mzk0OTUxNTM0NA== }
   # MiniMax 两个号是不同的：稀宇科技偏公司动态，开放平台偏 API/开发者。
   - { name: MiniMax 稀宇科技,  fakeid: MzE5MTA3NzcxMQ==, alias: minimax-openplatform }
   - { name: MiniMax开放平台,   fakeid: MzYzOTEwNjEyNw==, alias: minimax-platform }
   - { name: 百川智能,          fakeid: MzkzNzU0OTg0Mw== }
-  - { name: 阶跃StepFun,      fakeid: MzkyNTYxNzg5Mg== }
-  - { name: 面壁智能,          fakeid: Mzg3Mzg2MTg2NQ== }
   - { name: 字节跳动Seed,      fakeid: MzkzMDY5MzYxNg== }
   - { name: 火山引擎,          fakeid: MzI0NzU1NzI5NQ==, alias: volcengine }
   - { name: 腾讯混元,          fakeid: MzkwODU2OTQyNQ== }
   - { name: 百度文心,          fakeid: MzI5NzUyMzM1Mg== }
   - { name: 讯飞开放平台,       fakeid: MjM5NDE3OTM5MA== }
   - { name: DeepSeek,        fakeid: Mzk0OTYwNzc3NQ== }
-  - { name: 昆仑万维集团,       fakeid: MzI1MzE1NDc3Mg== }
   - { name: 智源研究院,        fakeid: MzI2MDcxMzQzOA== }
-  - { name: 商汤科技SenseTime, fakeid: MzIwNTcyNzYwMA== }
+  # ── 大厂技术号 ──────────────────────────
+  # fakeid 由文章链接解出：python -m sourcepilot.channels.wechat.biz <链接>
+  - { name: 百灵大模型,        fakeid: MzkyODk2MDQwNw==, alias: AntLingAGI }
+  - { name: GLM大模型,        fakeid: MzkxNjMzMjM3NA==, alias: glm_bm }
+  - { name: 豆包,             fakeid: MzkzMTY2MzMzMQ==, alias: doubao_official }
+  - { name: 千问AI平台,        fakeid: MzIzOTU0NTQ0MA==, alias: ali_tech }
+  - { name: 京东技术,          fakeid: MzU1MzE2NzIzMg==, alias: jingdongjishu }
+  - { name: 京东云开发者,       fakeid: MzU1OTgxMTg2Nw==, alias: JDT_Developers }
+  - { name: 小米技术,          fakeid: MzUxMDQxMDMyNg==, alias: Xiaomi-tech }
   # ── 媒体号 ──────────────────────────────
-  - { name: 量子位,           fakeid: MzIzNjc1NzUzMw==, alias: QbitAI }
   - { name: 机器之心,          fakeid: MzA3MzI4MjgzMw==, alias: almosthuman2014 }

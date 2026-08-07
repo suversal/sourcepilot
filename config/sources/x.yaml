@@ -45,3 +45,4 @@ per_account_limit: 20
 accounts:
   - OpenAI
   - AnthropicAI
+  - thsottiaux
