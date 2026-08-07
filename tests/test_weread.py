@@ -144,6 +144,22 @@ class TestCredentials:
     def test_repr_hides_cookie(self):
         assert "secret" not in repr(WereadCredentials("wr_skey=secret"))
 
+    def test_detects_cookie_without_the_auth_keys(self):
+        """只有埋点键的 cookie 要当场认出来。
+
+        2026-08-07 踩过：复制到的整串里只有 `_qimei_*`/`_clck` 这些腾讯通用埋点，
+        `wr_*` 一个没有。这种 cookie 能过书架那道浅校验，却在拉文章时回
+        -2010/-2041——看着像账号被风控，实际只是复制得不全。
+        """
+        junk = "_qimei_q36=x; _clck=y; pgv_pvid=z"
+        assert WereadCredentials(junk).missing_keys() == ["wr_vid", "wr_skey"]
+
+    def test_complete_cookie_reports_nothing_missing(self):
+        assert WereadCredentials("wr_vid=1; wr_skey=abc; wr_rt=z").missing_keys() == []
+
+    def test_empty_value_counts_as_missing(self):
+        assert "wr_skey" in WereadCredentials("wr_vid=1; wr_skey=").missing_keys()
+
 
 class TestOriginalId:
     """微信读书把文章 id 里的下划线换成了 `~`，不换回来链接打不开。"""

@@ -110,6 +110,11 @@ class WereadCredentials:
     def __init__(self, cookie: str) -> None:
         self.cookie = cookie
 
+    #: 登录态真正靠这两项。少了它们照样能过书架那道浅校验，却会在拉文章时
+    #: 回 -2010/-2041——排查起来像「被风控」，实际只是 cookie 复制得不全
+    #: （2026-08-07 踩过：整串里只有 `_qimei_*`/`_clck` 这些埋点键）。
+    REQUIRED_KEYS = ("wr_vid", "wr_skey")
+
     @classmethod
     def load(cls, path=None) -> WereadCredentials | None:
         path = path or CREDENTIALS_FILE
@@ -120,6 +125,15 @@ class WereadCredentials:
         if not cookie:
             return None
         return cls(cookie)
+
+    def missing_keys(self) -> list[str]:
+        """cookie 里缺哪些必需项。空列表 = 形状没问题（不代表没过期）。"""
+        present = {
+            part.split("=", 1)[0].strip()
+            for part in self.cookie.split(";")
+            if "=" in part and part.split("=", 1)[1].strip()
+        }
+        return [key for key in self.REQUIRED_KEYS if key not in present]
 
     def __repr__(self) -> str:  # 防止 cookie 被日志或异常栈带出去
         return "<WereadCredentials cookie=***>"

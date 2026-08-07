@@ -32,6 +32,18 @@ def check() -> int:
         print("        任一请求的 Request Headers → 复制整条 Cookie")
         return 1
 
+    missing = credentials.missing_keys()
+    if missing:
+        # 先判形状再发请求：缺 wr_skey 时接口回的是 -2010/-2041，看着像风控或
+        # 地址失效，会把人带偏（2026-08-07 为此排查了半天）。
+        print(f"✗ cookie 里缺少必需项：{', '.join(missing)}")
+        print("  只有 _qimei_*/_clck 这些埋点键是不够的——那说明复制时没登录，")
+        print("  或者是在别的腾讯域名下复制的。")
+        print("  正确做法：确认 weread.qq.com 左上角显示你的头像后，")
+        print("  F12 → Application → Cookies → https://weread.qq.com，")
+        print("  确认列表里能看到 wr_vid 和 wr_skey，再整串复制。")
+        return 1
+
     client = WereadClient(credentials)
 
     try:
