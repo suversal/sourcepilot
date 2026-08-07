@@ -55,6 +55,7 @@ from ...contracts import (
     Item,
     RateLimited,
     Source,
+    SourcePilotError,
     SourceType,
     TimeBasis,
     UpstreamDown,
@@ -73,7 +74,13 @@ BOOK_ID_PREFIX = "MP_WXS_"
 
 #: 微信读书的业务错误码。它和公众平台一样：HTTP 200，真状态在响应体里。
 ERR_CONTEXT_REQUIRED = -2041  # 请求没发在阅读器页上下文里
-ERR_NO_SUCH_USER = -2010  # 登录态失效
+ERR_NO_SUCH_USER = -2010  # 用户不存在
+ERR_LOGIN_TIMEOUT = -2012  # 「登录超时」——cookie 过期，要重新登录 weread.qq.com
+#: 这两个都是登录态问题，报 AUTH_EXPIRED 让冷却状态机按「要人介入」退避。
+#: 关键在于 AUTH_EXPIRED 属于 BACKEND_LEVEL_FAILURES：第一个号失败就冷却整个后端，
+#: 后面 22 个号直接跳过。否则每个号都会重试一次书架——23 次无谓请求打在一个
+#: 有反爬的接口上，正是把额度耗光的那种打法。
+_AUTH_ERRORS = frozenset({ERR_NO_SUCH_USER, ERR_LOGIN_TIMEOUT})
 
 _DEEP_LINK_V = re.compile(r"[?&]v=([^&]+)")
 
@@ -138,6 +145,7 @@ class WereadClient:
         self._creds = credentials
         self.timeout = timeout
         self._shelf: dict[str, str] | None = None
+        self._shelf_error: SourcePilotError | None = None
 
     def _headers(self, referer: str = WEREAD_BASE) -> dict[str, str]:
         return {
@@ -169,8 +177,15 @@ class WereadClient:
             ) from exc
 
         err = payload.get("errCode")
-        if err == ERR_NO_SUCH_USER:
-            # 契约 §5：对外只说平台侧不可用，不暴露账号细节。
+        if err in _AUTH_ERRORS:
+            # 日志里说清楚怎么修（运维看得到），对外只说平台侧不可用（契约 §5：
+            # 不暴露账号细节）。
+            log.warning(
+                "微信读书登录态失效（errCode=%s %s）：重新登录 weread.qq.com 后"
+                "更新 config/weread_credentials.yaml 的 cookie",
+                err,
+                payload.get("errMsg") or "",
+            )
             raise AuthExpired("公众号采集暂不可用")
         if err == ERR_CONTEXT_REQUIRED:
             raise UpstreamDown(
@@ -204,9 +219,17 @@ class WereadClient:
         """
         if self._shelf is not None:
             return self._shelf
-        payload = self._get(
-            SHELF_URL, {"synckey": 0, "teenmode": 0, "album": 1}, WEREAD_BASE
-        )
+        if self._shelf_error is not None:
+            # 失败也要记住。不记的话，非后端级的错误（比如一次网络抖动）会让
+            # 23 个号各自重试一次书架——23 次无谓请求打在有反爬的接口上。
+            raise self._shelf_error
+        try:
+            payload = self._get(
+                SHELF_URL, {"synckey": 0, "teenmode": 0, "album": 1}, WEREAD_BASE
+            )
+        except SourcePilotError as exc:
+            self._shelf_error = exc
+            raise
         shelf: dict[str, str] = {}
         for book in payload.get("books") or []:
             book_id = str(book.get("bookId") or "")

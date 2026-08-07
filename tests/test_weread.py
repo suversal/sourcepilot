@@ -227,6 +227,35 @@ class TestClient:
             WereadClient(WereadCredentials("c")).shelf()
         assert "cookie" not in exc.value.message.lower()
 
+    def test_login_timeout_is_auth_expired_not_upstream_down(self, monkeypatch):
+        """-2012「登录超时」= cookie 过期，必须报 AUTH_EXPIRED。
+
+        报成 UPSTREAM_DOWN 有两个后果：运维以为是微信读书挂了而不是自己该重新
+        登录；更要命的是 UPSTREAM_DOWN 不属于 BACKEND_LEVEL_FAILURES，不会冷却
+        后端——于是 23 个号各自重试一次书架，把有反爬的接口打 23 遍。
+        """
+        from sourcepilot.channels.wechat.weread import ERR_LOGIN_TIMEOUT
+
+        _stub_http(
+            monkeypatch,
+            {"/web/shelf/sync": {"errCode": ERR_LOGIN_TIMEOUT, "errMsg": "登录超时"}},
+        )
+        with pytest.raises(AuthExpired):
+            WereadClient(WereadCredentials("c")).shelf()
+
+    def test_shelf_failure_is_remembered_not_retried_per_account(self, monkeypatch):
+        """书架失败要记住。否则一次抖动会被 23 个号放大成 23 次请求。"""
+        from sourcepilot.channels.wechat.weread import ERR_LOGIN_TIMEOUT
+
+        seen = _stub_http(
+            monkeypatch, {"/web/shelf/sync": {"errCode": ERR_LOGIN_TIMEOUT}}
+        )
+        client = WereadClient(WereadCredentials("c"))
+        for _ in range(3):
+            with pytest.raises(AuthExpired):
+                client.shelf()
+        assert len(seen) == 1
+
     def test_context_error_is_upstream_not_auth(self, monkeypatch):
         """-2041 是阅读器地址过期，重同步书架就能好——不该报成凭据失效让人去重扫码。"""
         _stub_http(
