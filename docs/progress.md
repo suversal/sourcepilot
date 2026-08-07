@@ -7,7 +7,7 @@
 > 契约决议在 [contract.md](contract.md) §0；每次变更的具体理由在 git commit message 里。
 > 本文件只回答三个问题：**做到哪了 · 怎么验证的 · 还欠什么**。
 
-最后更新：2026-07-31
+最后更新：2026-08-06
 
 ---
 
@@ -85,6 +85,9 @@ P2 = 体验问题**。
 | T6 | P2 | 推模式（webhook / 队列） | 开发文档 §7 定的是「拉 + 推」两种模式。**已降级为 P2**：实测增量拉取 `since=` 只要 4ms，AIRADAR 轮询成本几乎为零，且天然幂等容错（挂了重启带上次 since 继续，一条不丢）。推模式只换来几十秒延迟，代价是重试/去重/验签/新端点，还得替消费方记住「哪些推过了」——那等于把它的状态搬到我们这边 |
 | T7 | P2 | 并发抓取 | 24 源串行，冷启动约 40s。源越多越难看 |
 | T8 | P2 | 代理轮换（接 Clash） | 第 4 步剩下的唯一子项。三级优先级：per-source > 全局 > 环境变量。**现在不急**——只有 X 有 IP 层风险且请求量很低。真做时的工作量不在 `httpx.Client(proxy=)` 那一行，而在配置层级解析、代理自身健康检查、以及和冷却状态机的配合（代理被封该冷却代理，不是冷却账号） |
+| ~~T10~~ | ❌ 不做 | ~~补官网源替代公众号覆盖~~ | **2026-08-06 决定不做**。公众号线停用后曾提议用厂商官网源顶上（已探明商汤 `sensetime.com/cn/news`、智源 `hub.baai.ac.cn`、MiniMax、昆仑、零一万物、机器之心静态可抓，其余多为 SPA）。**决策：公众号信源不用官网替代**——官网发的是版本公告与公关稿，公众号发的是解读与一手动态，两者不是同一批内容，用前者冒充后者会让下游以为「这家厂商的动静我们都收着」，而实际漏掉的正是有信息量的那部分。公众号这条线保持停用，等能力恢复或找到真正的公众号路线再说 |
+| T11 | P2 | 修 `qwen` 源 | 与上一条**无关**（这是既有 vendor 源坏了，不是公众号替代）：`qwenlm.github.io/blog/index.xml` 还能取到 44 条但最新停在 2025-09，Qwen 已搬到 `qwen.ai`，新站是 SPA、`/rss.xml` 返回同一份 HTML，静态抓不到。要么找它的前端 API，要么这个源摘掉别挂着装样子 |
+| T9 | P2 | `/items` 按公众号过滤（或 `/wechat/feed` 加 `since`） | AIRADAR Phase 1 接入实测发现（2026-08-04）：`/items` 的 `platform` 白名单只认信源配置名（`wechat` 整体算一个），不认具体公众号名；按号过滤只能走 `/wechat/feed`，而它没有 `since` 参数（契约 §4 如此）。下游已用 `/wechat/feed` + 客户端水位过滤落地，本机毫秒级查询下没有实际代价，所以只是 P2。真做时二选一：platform 白名单纳入公众号名，或 `/wechat/feed` 加 `since`（加可选参数属 minor） |
 
 ---
 
@@ -121,6 +124,14 @@ P2 = 体验问题**。
 | 文章列表要用 list_ex 不是 appmsgpublish | 参考项目 we-mp-rss 用的是 `appmsgpublish`，返回转义两层的 publish_page（publish_list → publish_info → appmsgex），解析链长且脆；实测同一个号 `appmsg?action=list_ex` 直接给扁平的 app_msg_list，一次 20 条、字段齐全 | 已改用 list_ex，并加测试钉住端点选择 |
 | 公众号必须有登录态 | `mp.weixin.qq.com` 的 searchbiz / appmsgpublish 匿名请求一律回 `{"ret":200003,"err_msg":"invalid session"}`（实测 2026-07-26）；微信读书那条路的公众号端点也需登录 | **已用真实凭据跑通**（2026-07-26）：量子位 + 机器之心共 34 条入库，标题/摘要/发布时间/封面图齐全。搜狗那条兜不住已降为可选（见下条）。凭据两条路：浏览器里登录后手动复制 token+cookie（推荐，无自动化痕迹），或跑扫码助手。实测裸 HTTP 的扫码流程可用（startlogin 回 uuid、getqrcode 回真实 JPEG），**不需要 Playwright**——参考项目 we-mp-rss 上浏览器是为了多账号切换和指纹伪装。凭据存在 gitignore 的文件里。**这条线的真实采集从未验证过** |
 | 公众号是最易被封的一条线 | 走的是公众平台后台接口，不是官方开放 API | 整块隔离在 `channels/wechat.py`，坏了整块换。账号之间留 3 秒间隔，凭据失效立刻停手不继续捅 |
+| ✅ **公众号已靠微信读书恢复（主力换 weread）** | 2026-08-06：微信读书是与公众平台**完全独立的另一套系统**，不受 7-30 那次关闭影响——实测公开的 Wechat2RSS 服务（其部署文档写明「通过读书获取公众号信息」）在关闭之后仍输出当天文章（量子位 08-05 14:08、机器之心 08-05 14:10，均带全文）。关键换算：**微信读书把公众号当「书」，`bookId = "MP_WXS_" + base64解码(fakeid)`**，而 fakeid 就是 `__biz`，我们 23 个号全都有，不必像其它实现那样为每个号手工找一篇文章链接 | 新增 `channels/wechat/weread.py`（+ `weread_check.py` 自检），`backends: [weread]`。**三个坑已写进代码注释**：① `/web/mp/articles` 必须带阅读器页 Referer，否则恒 `-2041`（上下文校验，不是限流），而那串 hash 每个号不同、只能从书架 `deepLink` 取；② 一次群发是一个 `reviews` 条目，`subReviews` 才是一篇篇文章，只读 `[0]` 会漏；③ 有反爬，`min_interval` 设 6 小时（一轮 24 个请求） |
+| ❌ ~~跨公众号列表能力被微信关闭，channel 已停用~~（mp 后端仍不可用，channel 已由 weread 顶上） | 2026-08-06 实测：`appmsg?action=list_ex` 恒回 `{"ret":200013,"err_msg":"freq control"}`，而**同一套凭据打 searchbiz 仍 `ret=0`**。四组对照全部排除：换公众号主体、换个人微信号(wxuin)、IPv6/强制 IPv4 出口——均 200013。同期三个开源项目报同一现象且共同特征是**第一页零结果就被拒**（历史累计频控是跑几小时后才出现）：we-mp-rss #440（7-30，已独立核实正文含 `ret==200013` + `stop at 0`）、wechat-article-exporter #199、wechat-download-api #22 | **`enabled: false`**，理由与复开条件写在 [wechat.yaml](../config/sources/wechat.yaml) 文件头。`appmsg` 的 200013 现在报「不是临时频控」而非「稍后重试」——后者会把运维带向换号/等待的死路（我们为此白花了几天）。能力恢复的判据：`python -m sourcepilot.channels.wechat.check` 的 appmsg 回 `ret=0` |
+| `/api/v1/article` 保留，但 AIRADAR 不再用它取公众号正文 | 2026-08-06 复核：AIRADAR 自己就有能抓公众号的提取器（`article_content.py` 的 `wechat-article-v1` profile，草稿管理天天在用）。实测同一篇文章两边覆盖度一致（都是 2 个小标题 + 7 张图），绕来 SP 只是多一跳、多一处跟着微信改版维护的代码 | **端点保留**——它是契约里的六个工具之一，MCP 出口与其它消费方仍需要，不因为某个下游不用了就删。AIRADAR 侧已改回自己的 `fetch_manual_article()`，理由与实测数据记在 `HotAI/docs/sourcepilot-integration-plan.md` §9.2 |
+| 微信读书回的文章 id 把 `_` 换成了 `~` | 微信文章 id 用 base64url 字符集（`A-Za-z0-9_-`），**不含 `~`**。原样拼进 URL 会得到「参数错误」页。实测 2026-08-06：`XK6ymJL7y0vo~GQXxmpuBA` 打不开，换成 `_` 后正常（DeepSeek-V3 那篇）；换成 `-` 仍是参数错误；`~~` 连着的同理 | `normalize_original_id()` 只替换 `~`，**不动 `-`**——真实 id 里本来就有连字符（如 `nL--rVri3qAy~6Recsg~4g`），一起换会把好 id 改坏。库里已产生的 63 条（SP）+ 13 条（AIRADAR）坏链接已就地修复，AIRADAR 侧连 `url_hash` 一起改，否则下轮会当新文重复入库 |
+| **书架不是准入名单，只是一张通行证** | `-2041` 那道校验只认「Referer 是不是合法的阅读器页」，**不比对 bookId**。实测 2026-08-06：拿书架里某个 Kimi 号的阅读器页当 Referer，去拉根本不在书架里的量子位，返回 77 篇、机器之心 53 篇，最新都是当天的 | 所以**要订阅的号不必逐个加进微信读书书架**——参考实现里那条前提是多余的。书架里有任意一个公众号能换到通行证即可，一次性设置。`WereadClient.reader_ticket()` 干这件事 |
+| weread 的固有局限（平台侧，别当 bug 修） | **收录滞后**：部分号在微信读书侧收录慢，实测遇到过滞后半个多月的；**不实时**：通常比发布晚几小时；**有反爬**：参考实现作者一天 30 多次快速请求就白屏几小时；**fakeid 是必需的**（微信读书网页端搜不到公众号名，实测多种参数组合全返回图书，没法按名字兜底） | 撞风控就把 `min_interval` 与 `account_interval` 一起往上调，别指望重试。实测一轮 23 个号 89 秒、230 条，零失败 |
+| ~~三条替代路线全部探过，当前无自持方案~~（微信读书那条实为可用，见上） | **搜狗**：账号索引已死（`type=1` 回「暂无相关的官方认证订阅号」）；文章搜索还在但是按相关性排的关键词搜索——搜「量子位」9 条里 8 条是 2019–2022 老文，还混进「量子位=qubit」的量子计算文章，**移动入口结果不带发布者字段**，做不了「精确发布者过滤」；`usip`/`tsn`/`sortType` 一律返回空页。**wewe-rss**：自己不实现微信读书协议，转发给作者托管的 `weread.111965.xyz`（无 token 回 401），不能当参考实现。**Wechat2RSS**：现成可用（¥150/年私有部署），但用户协议禁止商用和内容分发。**profile_ext/getmsg**：需 `__biz`/`uin`/`key` 这套客户端短期凭据，与后台 token+cookie 不是同一模型，key 二十分钟级过期 | **注意别拿 `weread.qq.com/web/search/global` 验证微信读书能不能用**——它只搜图书，公众号走的是 `/web/mp/*` 那组需登录态的接口，是两回事。我第一次就是这么误判成「微信读书也断了」的。**qwen 源已失效待修**（qwenlm.github.io 停在 2025-09，新站 qwen.ai 是 SPA 抓不了），见 T11 |
+| ✅ **AIRADAR 已接入公众号信源（下游 Phase 1 落地）** | 2026-08-04：AIRADAR 侧新增 `SourcePilotCrawler`，23 个公众号各建一个 `type=sourcepilot` 源，走 `/wechat/feed?account=` 拉取 + `/article` 补全文（htmlmd 提取实测量子位 27 篇 20 篇全文）；完整管线验证 27 抓取/18 入选/19 落库。方案与实施记录在 `HotAI/docs/sourcepilot-integration-plan.md` §8 | 接入中发现的契约缺口记 T9。SP 侧本次零改动 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 
 ---

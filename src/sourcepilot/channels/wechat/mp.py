@@ -44,6 +44,18 @@ RET_OK = 0
 RET_INVALID_SESSION = 200003
 RET_FREQ_LIMIT = 200013
 
+#: `appmsg` 拿 200013 时的说明。**这不是「等一会儿就好」的临时频控**——
+#: 2026-07-30 前后微信收紧了第三方跨公众号调用文章列表的权限，实测（2026-08-06）
+#: 换公众号主体、换个人微信号、IPv4/IPv6 换出口全部无效，而同一套凭据打
+#: searchbiz 仍返回 ret=0。同期至少三个开源项目报同一现象（we-mp-rss #440
+#: 2026-07-30、wechat-article-exporter #199、wechat-download-api #22），
+#: 共同特征是**第一页、零结果就被拒**，与历史上「跑几小时后累计被限」不同。
+#: 详见 config/sources/wechat.yaml 文件头。
+CROSS_ACCOUNT_LIST_CLOSED = (
+    "跨公众号文章列表被拒（ret=200013）。这不是临时频控，等待与换账号都无效："
+    "微信自 2026-07-30 前后收紧了第三方调用该接口的权限。详见 config/sources/wechat.yaml"
+)
+
 
 class Credentials:
     """公众平台登录态。明文只在内存里，不进日志、不进响应。"""
@@ -104,6 +116,10 @@ class WechatClient:
             # 对外只说「平台侧不可用」，不暴露是哪个账号、为什么失效（契约 §5）。
             raise AuthExpired("公众号采集暂不可用")
         if ret == RET_FREQ_LIMIT:
+            # 按接口分别说明：searchbiz 的 200013 仍是真·频控（歇一会儿能好），
+            # appmsg 的 200013 自 2026-07-30 起是能力被关，说「稍后重试」会误导运维。
+            if url == APPMSG_LIST:
+                raise RateLimited(CROSS_ACCOUNT_LIST_CLOSED)
             raise RateLimited("公众平台触发频率限制")
         if ret != RET_OK:
             raise UpstreamDown(f"公众平台返回业务错误 {ret}")

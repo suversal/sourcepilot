@@ -128,6 +128,39 @@ class TestErrorMapping:
         with pytest.raises(RateLimited):
             client.search_account("量子位")
 
+    def test_article_list_freq_limit_says_capability_closed_not_retry_later(
+        self, monkeypatch
+    ):
+        """appmsg 的 200013 与 searchbiz 的 200013 含义不同，报错必须分开说。
+
+        2026-07-30 起微信关掉了第三方跨号拉列表的能力（换账号、换 IP 都无效），
+        此时报「稍后重试」会把运维带向错误的修复动作——那正是我们花了几天
+        去换 token、换账号才排除掉的弯路。
+        """
+        client = self._client_returning(monkeypatch, {"base_resp": {"ret": RET_FREQ_LIMIT}})
+        with pytest.raises(RateLimited) as exc:
+            client.list_articles("MzIzNjc1NzUzMw==")
+        assert "不是临时频控" in exc.value.message
+        assert "wechat.yaml" in exc.value.message
+        # searchbiz 那条仍是真频控，不该被换成同一句
+        with pytest.raises(RateLimited) as search_exc:
+            client.search_account("量子位")
+        assert search_exc.value.message != exc.value.message
+
+    def test_mp_closure_stays_documented_in_the_config(self):
+        """mp 被关的证据必须留在配置文件里。
+
+        channel 已靠 weread 恢复工作，正因如此更要留档——否则下一个人看到
+        「公众号采集好好的」，会顺手把 mp 加回 backends，然后重新花几天去查
+        那个 200013 是不是自己把额度打爆了。
+        """
+        from sourcepilot.settings import PROJECT_ROOT
+
+        text = (PROJECT_ROOT / "config" / "sources" / "wechat.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "200013" in text and "searchbiz 仍返回 ret=0" in text
+
 
 class TestCollect:
     def test_without_credentials_is_a_config_state_not_a_failure(
@@ -328,7 +361,10 @@ class TestShippedConfig:
 
         cfg = load_sources(SOURCES_DIR)["wechat"]
         assert cfg.channel == "wechat"
-        assert cfg.backends == ["mp"], "搜狗实测兜不住，不该在默认链里"
+        assert "sogou" not in cfg.backends, "搜狗实测兜不住，不该在默认链里"
+        # 2026-08-06：mp 的跨号列表被微信关了，主力换成微信读书。
+        # mp 也不该留在链里——它每轮只会白撞一次 200013 消耗额度。
+        assert cfg.backends == ["weread"]
 
     def test_credentials_file_is_gitignored(self):
         from sourcepilot.settings import PROJECT_ROOT
