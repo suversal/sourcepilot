@@ -20,6 +20,7 @@ from . import __version__
 from .article import ArticleService
 from .canary import Canary
 from .channels.cooldown import COOLDOWNS
+from .channels.rotation import ROTATION
 from .channels.x import TWEET_SINK
 from .collector import Collector, Scheduler
 from .contracts import (
@@ -100,6 +101,8 @@ def create_app(
         COOLDOWNS.bind(store)
         # 推文全貌的落库出口。不绑定的话 X 采集照常跑，只是不写推文表。
         TWEET_SINK.bind(store)
+        # 批次轮转游标。不绑定就退化成每轮从头开始。
+        ROTATION.bind(store)
         # 没有后台采集，只有被 /hotlist 打到的源会更新，厂商发布那类永远是空的。
         if scheduler:
             background.start()

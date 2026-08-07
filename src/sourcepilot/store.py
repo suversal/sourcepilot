@@ -125,6 +125,14 @@ CREATE INDEX IF NOT EXISTS idx_tweets_created ON x_tweets(created_at DESC, tweet
 CREATE INDEX IF NOT EXISTS idx_tweets_author  ON x_tweets(author_handle, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tweets_convo   ON x_tweets(conversation_id);
 
+-- channel 的轮转游标等小状态。做成通用 kv 而不是给 source_state 加列：
+-- 这类状态是 channel 自己的实现细节，加进 source_state 会让每个源都带上
+-- 一个跟自己无关的字段。
+CREATE TABLE IF NOT EXISTS channel_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cooldowns (
     key         TEXT PRIMARY KEY,
     until       TEXT NOT NULL,
@@ -603,6 +611,21 @@ class Store:
     # ---------- 冷却 ----------
     # 冷却必须落盘：进程内的话，重启一次就会立刻去捅一个刚被封的账号。
     # 这是账号安全问题，不是体验问题。
+
+    def get_channel_state(self, key: str, default: str = "") -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM channel_state WHERE key=?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+
+    def set_channel_state(self, key: str, value: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO channel_state VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
 
     def save_cooldown(self, key: str, until: datetime, code: str) -> None:
         with self._conn() as conn:

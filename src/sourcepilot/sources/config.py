@@ -274,6 +274,16 @@ class SourceConfig(BaseModel):
     per_account_limit: int = Field(
         default=10, ge=1, le=50, description="channel 专用：每个账号取多少条"
     )
+    batch_size: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "channel 专用：每轮只抓这么多个账号，下轮接着往后。None = 一轮抓完。"
+            "用于把请求密度摊开——微信读书对**单轮的请求总量**敏感，"
+            "24 个号一次打完会触发人机验证，摊成 4 轮各 6 个就落在容忍度内。"
+            "代价是单个号的更新延迟乘以批数，而公众号本来就不是分钟级信源。"
+        ),
+    )
     account_interval: float = Field(
         default=3.0,
         ge=0,

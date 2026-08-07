@@ -29,6 +29,7 @@ from ...contracts import AuthExpired, Item, SourcePilotError
 from ...sources.config import SourceConfig
 from ...sources.engine import register_channel
 from ..cooldown import BACKEND_LEVEL_FAILURES, COOLDOWNS
+from ..rotation import ROTATION
 from .mp import Credentials, MpBackend, WechatClient
 from .sogou import SogouBackend
 from .weread import WereadBackend, WereadCredentials
@@ -60,6 +61,8 @@ def collect_wechat(config: SourceConfig) -> list[Item]:
     accounts = list(config.accounts or [])
     if not accounts:
         return []
+    # 分批轮转：微信读书对单轮请求总量敏感，24 个号一次打完会弹验证码。
+    accounts = ROTATION.take("wechat", accounts, config.batch_size)
 
     # 默认顺序 2026-08-06 起把 weread 提到最前：mp 的跨号列表能力被微信关了。
     backends = _build(config.backends or ["weread", "mp"], config.account_interval)
