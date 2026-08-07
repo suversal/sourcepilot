@@ -1,5 +1,9 @@
 # Moonshot 的研究博客现在挂在 kimi.com/blog 下。卡片里两个 span：
 # 第一个是模型/项目名，第二个是副标题。
+#
+# **卡片的 href 是相对路径**（`/blog/kimi-k3`），所以 base_url 必填——少了它
+# 21 行全部抽得出标题和摘要，却一条都归一化不了（Item 要求 url 是 http(s)），
+# 报出来是「字段配置该改了」，很容易误以为对方改版。实测 2026-08-07 修复。
 name: kimi
 display_name: Kimi（月之暗面）研究博客
 type: vendor
@@ -8,6 +12,7 @@ enabled: true
 min_interval: 3600  # 厂商博客
 lang: en
 categories: [model]
+base_url: https://www.kimi.com
 
 request:
   url: https://www.kimi.com/blog/

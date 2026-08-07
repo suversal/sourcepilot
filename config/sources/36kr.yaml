@@ -1,3 +1,19 @@
+# **2026-08-07 停用：36氪整站挂到了火山引擎的安全检测后面。**
+#
+# `/feed` 现在回的不是 RSS 而是一张挑战页（「正在检测当前网络环境，该过程通常
+# 需要几秒钟」），HTTP 200、17KB、零个 <item>，XML 解析器读到 <!DOCTYPE html>
+# 就报 not well-formed——**报错说的是「RSS 解析失败」，但链接本身没死，是被拦了**。
+#
+# 试过的都不行（2026-08-07）：
+#   /feed、/feed-newsflash、/feed-article、/api/newsflash → 同一张挑战页
+#   curl_cffi impersonate 的 safari / chrome / chrome131 / safari17_0 / edge101
+#     → 全部同一张挑战页。这道墙要执行 JS，TLS 指纹伪装穿不过去
+#   rsshub.app/36kr/newsflashes → 403
+#
+# 要恢复只有两条路：上浏览器自动化（与「能走稳定接口就不用浏览器」的取舍相悖），
+# 或等对方放开。配置留在仓库里，墙撤了把 enabled 改回 true 即可。
+#
+# ── 以下是之前的选型记录，恢复时仍适用 ──
 # 2026-07-26 改用官方 RSS。原先抓快讯列表页，实测对比：
 #   HTML 快讯页  55 条，**时间/摘要/作者全无**（列表只显示时分，取不到日期）
 #   官方 RSS     30 条，有完整发布时间，摘要 5000+ 字
@@ -6,7 +22,8 @@ name: 36kr
 display_name: 36氪
 type: hotlist
 platform: 36kr
-enabled: true
+# 见文件头：挂在火山引擎安全检测后面，开着只会每轮报一次 XML 解析失败
+enabled: false
 min_interval: 3600
 lang: zh
 
