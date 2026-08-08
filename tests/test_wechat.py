@@ -645,3 +645,107 @@ class TestCaptchaIsNotUpstreamDown:
 
         assert ErrorCode.CAPTCHA in BACKEND_LEVEL_FAILURES
         assert ErrorCode.UPSTREAM_DOWN not in BACKEND_LEVEL_FAILURES
+
+
+class TestWereadAutoRenewal:
+    """微信读书的 `wr_skey` 大约 1–2 天就过期。
+
+    `/web/login/renewal` 是 web 端自己在用的续期机制，靠 cookie 里的 `wr_rt`
+    换新 skey——实测拿一个**已作废的 skey** 去请求照样下发有效值，说明它认的
+    是 rt 而不是 skey。这不是绕过任何东西，是用官方接口做官方的事。
+    """
+
+    COOKIE = "_qimei_uuid42=x; wr_vid=123; wr_skey=OLD; wr_rt=web%40token; wr_name=n"
+
+    def _client(self, tmp_path, monkeypatch):
+        from sourcepilot.channels.wechat import weread
+
+        path = tmp_path / "cred.yaml"
+        path.write_text(f"cookie: '{self.COOKIE}'\n", encoding="utf-8")
+        monkeypatch.setattr(weread, "CREDENTIALS_FILE", path)
+        return weread.WereadClient(weread.WereadCredentials(self.COOKIE)), path
+
+    def test_merged_cookie_keeps_every_other_field(self, tmp_path, monkeypatch):
+        """cookie 里还有一堆埋点键，重新拼装容易漏——漏掉的后果是浅校验能过、
+        拉文章才报错。"""
+        from sourcepilot.channels.wechat.weread import WereadCredentials
+
+        merged = WereadCredentials(self.COOKIE).merged_with({"wr_skey": "NEW"})
+        assert "wr_skey=NEW" in merged
+        assert "_qimei_uuid42=x" in merged and "wr_name=n" in merged
+        assert "wr_skey=OLD" not in merged
+
+    def test_renew_writes_the_new_skey_back(self, tmp_path, monkeypatch):
+        import httpx
+
+        client, path = self._client(tmp_path, monkeypatch)
+
+        def fake_post(self, url, **kw):
+            return httpx.Response(
+                200, json={"succ": 1},
+                headers=[("set-cookie", "wr_skey=FRESH; Path=/"),
+                         ("set-cookie", "wr_rt=web%40newtoken; Path=/")],
+                request=httpx.Request("POST", url),
+            )
+
+        monkeypatch.setattr(httpx.Client, "post", fake_post)
+        assert client.renew() is True
+        saved = path.read_text(encoding="utf-8")
+        assert "wr_skey=FRESH" in saved and "wr_rt=web%40newtoken" in saved
+
+    def test_renew_ignores_expiry_directives(self, tmp_path, monkeypatch):
+        """Set-Cookie 里照单全收会把服务端的过期指令也当成值写进去。"""
+        import httpx
+
+        client, path = self._client(tmp_path, monkeypatch)
+        monkeypatch.setattr(httpx.Client, "post", lambda self, url, **kw: httpx.Response(
+            200, json={"succ": 1},
+            headers=[("set-cookie", "wr_skey=FRESH; Max-Age=0; Path=/"),
+                     ("set-cookie", "some_tracker=junk; Path=/")],
+            request=httpx.Request("POST", url)))
+        client.renew()
+        saved = path.read_text(encoding="utf-8")
+        assert "wr_skey=FRESH" in saved
+        assert "Max-Age" not in saved and "some_tracker" not in saved
+
+    def test_renew_fails_when_refresh_token_is_dead(self, tmp_path, monkeypatch):
+        """rt 也会过期。那时退回原来的行为：报 AUTH_EXPIRED 让人登录一次。"""
+        import httpx
+
+        client, _ = self._client(tmp_path, monkeypatch)
+        monkeypatch.setattr(httpx.Client, "post", lambda self, url, **kw: httpx.Response(
+            200, json={"succ": 0}, request=httpx.Request("POST", url)))
+        assert client.renew() is False
+
+    def test_auth_error_triggers_one_renewal_then_retries(self, tmp_path, monkeypatch):
+        from sourcepilot.channels.wechat import weread
+
+        client, _ = self._client(tmp_path, monkeypatch)
+        calls = []
+
+        def fake_once(url, params, referer):
+            calls.append(url)
+            if len(calls) == 1:
+                raise weread.AuthExpired("公众号采集暂不可用")
+            return {"errCode": 0, "ok": True}
+
+        monkeypatch.setattr(client, "_get_once", fake_once)
+        monkeypatch.setattr(client, "renew", lambda: True)
+        assert client._get("u", {}, "r") == {"errCode": 0, "ok": True}
+        assert len(calls) == 2, "续期后应该重试一次"
+
+    def test_renewal_is_attempted_only_once_per_client(self, tmp_path, monkeypatch):
+        """rt 也失效时，让每个号各试一次等于把失败放大 24 倍。"""
+        from sourcepilot.channels.wechat import weread
+
+        client, _ = self._client(tmp_path, monkeypatch)
+        renewals = []
+
+        monkeypatch.setattr(client, "_get_once", lambda *a: (_ for _ in ()).throw(
+            weread.AuthExpired("公众号采集暂不可用")))
+        monkeypatch.setattr(client, "renew", lambda: renewals.append(1) or True)
+
+        for _ in range(3):
+            with pytest.raises(weread.AuthExpired):
+                client._get("u", {}, "r")
+        assert len(renewals) == 1, "一个客户端只该续一次"

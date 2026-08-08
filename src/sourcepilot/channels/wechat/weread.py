@@ -127,6 +127,36 @@ class WereadCredentials:
             return None
         return cls(cookie)
 
+    def merged_with(self, updates: dict[str, str]) -> str:
+        """把新下发的字段并进 cookie，保持其余字段与顺序不变。
+
+        只替换值不重排：cookie 里还有一堆埋点键（`_qimei_*` 之类），
+        重新拼装容易漏掉，而漏掉的后果是浅校验能过、拉文章才报错。
+        """
+        parts = []
+        seen = set()
+        for part in self.cookie.split(";"):
+            part = part.strip()
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            key = key.strip()
+            parts.append(f"{key}={updates.get(key, value)}")
+            seen.add(key)
+        # 下发了但原本没有的字段补在末尾
+        parts += [f"{k}={v}" for k, v in updates.items() if k not in seen]
+        return "; ".join(parts)
+
+    def save(self, cookie: str, path=None) -> None:
+        """写回凭据文件，保留文件里的其它键。"""
+        path = path or CREDENTIALS_FILE
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data["cookie"] = cookie
+        path.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+        self.cookie = cookie
+
     def missing_keys(self) -> list[str]:
         """cookie 里缺哪些必需项。空列表 = 形状没问题（不代表没过期）。"""
         present = {
@@ -157,6 +187,8 @@ def book_id_for(fakeid: str) -> str | None:
 
 class WereadClient:
     def __init__(self, credentials: WereadCredentials, timeout: float = 20.0) -> None:
+        #: 本实例是否已经续过期。续期只该发生一次——rt 也失效时，
+        #: 让每个号各试一次等于把失败放大 24 倍。
         self._creds = credentials
         self.timeout = timeout
         self._shelf: dict[str, str] | None = None
@@ -164,6 +196,7 @@ class WereadClient:
         #: 本轮是否已经成功换到过阅读器页通行证。换到了还被 -2041 拒，
         #: 说明问题不在 Referer 而在风控。
         self._ticket_confirmed = False
+        self._renewed = False
 
     def _headers(self, referer: str = WEREAD_BASE) -> dict[str, str]:
         return {
@@ -177,6 +210,18 @@ class WereadClient:
         }
 
     def _get(self, url: str, params: dict[str, Any], referer: str) -> dict[str, Any]:
+        try:
+            return self._get_once(url, params, referer)
+        except AuthExpired:
+            # 登录态过期先自己续一次。`_renewed` 保证一轮采集里只续一次——
+            # rt 也失效时每个号都去试会变成 24 次无谓请求，而那正是「再捅
+            # 就要出事」的场面。
+            if self._renewed or not self.renew():
+                raise
+            self._renewed = True
+            return self._get_once(url, params, referer)
+
+    def _get_once(self, url: str, params: dict[str, Any], referer: str) -> dict[str, Any]:
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.get(url, params=params, headers=self._headers(referer))
@@ -196,6 +241,48 @@ class WereadClient:
 
         return self._check(payload)
 
+
+    def renew(self) -> bool:
+        """向微信读书官方的续期接口换一份新的登录态。
+
+        **这不是绕过任何东西**：`/web/login/renewal` 是 web 端自己在用的续期
+        机制，靠 cookie 里的 `wr_rt`（refresh token）换新 `wr_skey`。实测拿一个
+        **已作废的 skey** 去请求，照样下发有效值——说明它认的是 rt 而不是 skey，
+        所以 skey 过期之后仍然救得回来。
+
+        `wr_rt` 本身也有期限（比 skey 长得多）。它过期时这里返回 False，
+        调用方退回原来的行为：报 AUTH_EXPIRED，让人重新登录一次。
+        所以这不是永动机，是把「每 1–2 天换一次」降到「几周一次」。
+        """
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(
+                    f"{WEREAD_BASE}/web/login/renewal",
+                    json={"rq": "%2Fweb%2Fbook%2Fread"},
+                    headers={**self._headers(WEREAD_BASE), "Content-Type": "application/json"},
+                )
+        except httpx.HTTPError as exc:
+            log.warning("微信读书续期请求失败：%s", type(exc).__name__)
+            return False
+
+        if response.status_code != 200 or (response.json() or {}).get("succ") != 1:
+            return False
+
+        updates = {}
+        for raw in response.headers.get_list("set-cookie"):
+            key, _, rest = raw.partition("=")
+            value = rest.split(";", 1)[0]
+            # 只接管登录态相关的几个键。把 Set-Cookie 里的全部字段照单全收会
+            # 把服务端的过期指令（Max-Age=0 之类）也当成值写进去。
+            if key.strip() in ("wr_skey", "wr_rt", "wr_vid", "wr_pf"):
+                updates[key.strip()] = value
+
+        if "wr_skey" not in updates:
+            return False
+
+        self._creds.save(self._creds.merged_with(updates))
+        log.info("微信读书登录态已自动续期")
+        return True
 
     def _check(self, payload: dict[str, Any]) -> dict[str, Any]:
         """把响应体里的业务错误码翻成结构化错误。
