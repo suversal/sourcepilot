@@ -45,4 +45,22 @@ per_account_limit: 20
 accounts:
   - OpenAI
   - AnthropicAI
+  - claudeai
   - thsottiaux
+  - grok
+  - xiaohu
+  - dotey
+
+# 话题订阅（契约 §5.5）：事件追踪，与账号订阅平级的第二条腿。
+# 账号盖「官方说了什么」，话题盖「这个事件下大家在说什么」。
+# 结果标 origin=topic 进信息流；x_tweets.topics 带话题标识。
+# 注意：话题搜索走登录账号池（最贵的通道），少而精，别开闸放水。
+# query 用 X 搜索语法，min_faves 在上游过滤；min_likes 是采集侧兜底阈值。
+topics:
+  # sort 默认 top（X 的热门排序）。中文圈子小，min_faves 放低，靠 Top 排序出热度。
+  - name: u-card
+    query: '"U卡" min_faves:5'
+    limit: 20
+  - name: esim
+    query: 'eSIM min_faves:10'
+    limit: 20

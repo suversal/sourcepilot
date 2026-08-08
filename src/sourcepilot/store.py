@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS x_tweets (
     -- 漂移——Grok 摘要是延迟生成的，早抓拿不到、晚抓才有。
     article_ai_summary TEXT,
     article_cover      TEXT,
+    -- 命中的订阅话题（JSON 数组，如 ["gpt-5.6"]）。一条推文可命中多个话题；
+    -- 时间线采集不写这列（不覆盖），话题打标走 tag_tweet_topics 做合并。
+    topics             TEXT NOT NULL DEFAULT '[]',
     fetched_at         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tweets_created ON x_tweets(created_at DESC, tweet_id DESC);
@@ -213,6 +216,7 @@ class Store:
                 ("article_ai_summary", "TEXT"),
                 ("article_cover", "TEXT"),
                 ("richtext_tags", "TEXT NOT NULL DEFAULT '[]'"),
+                ("topics", "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if col not in tweet_cols:
                     conn.execute(f"ALTER TABLE x_tweets ADD COLUMN {col} {decl}")
@@ -278,11 +282,15 @@ class Store:
                     effective_at=COALESCE(excluded.published_at, items.discovered_at),
                     time_basis=excluded.time_basis, score=excluded.score,
                     categories=excluded.categories, media=excluded.media, raw=excluded.raw,
-                    -- origin 只能单向升级。一条推文先被某次搜索捞到、后来定时采集
+                    -- origin 只能单向升级：collected > topic > searched。
+                    -- 一条推文先被某次搜索捞到、后来定时采集
                     -- 也抓到了，它就确实属于订阅内容；反过来，已经在采集范围内的
                     -- 条目不该因为有人搜到它而被降级出信息流。
                     origin=CASE WHEN excluded.origin = 'collected'
-                                THEN 'collected' ELSE items.origin END
+                                THEN 'collected'
+                                WHEN excluded.origin = 'topic'
+                                     AND items.origin = 'searched'
+                                THEN 'topic' ELSE items.origin END
                 """,
                 rows,
             )
@@ -349,6 +357,34 @@ class Store:
             )
         return len(rows)
 
+    def tag_tweet_topics(self, tweet_ids: Sequence[str], topic: str) -> int:
+        """给一批推文打上话题标签，**合并**而不是覆盖。
+
+        单独一个方法而不是并进 upsert_tweets：一条推文可命中多个话题、也可能
+        同时在订阅账号的时间线里——upsert 的整行覆盖语义会让后到的采集把先到
+        的标签抹掉。合并逻辑用 SQL 表达太拧巴，量小，读改写即可。
+        """
+        if not tweet_ids:
+            return 0
+        tagged = 0
+        with self._conn() as conn:
+            for tweet_id in tweet_ids:
+                row = conn.execute(
+                    "SELECT topics FROM x_tweets WHERE tweet_id = ?", (tweet_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+                topics = json.loads(row["topics"] or "[]")
+                if topic in topics:
+                    continue
+                topics.append(topic)
+                conn.execute(
+                    "UPDATE x_tweets SET topics = ? WHERE tweet_id = ?",
+                    (json.dumps(topics, ensure_ascii=False), tweet_id),
+                )
+                tagged += 1
+        return tagged
+
     def query_tweets(
         self,
         *,
@@ -359,6 +395,7 @@ class Store:
         has_article: bool = False,
         missing_article_text: bool = False,
         tweet_types: set[str] | None = None,
+        topic: str | None = None,
         since: datetime | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -388,6 +425,10 @@ class Store:
             picked = [clauses[k] for k in sorted(tweet_types) if k in clauses]
             if picked:
                 where.append("(" + " OR ".join(f"({c})" for c in picked) + ")")
+        if topic:
+            # topics 是 JSON 数组文本（["gpt-5.6"]），带引号匹配不会误中子串
+            where.append("topics LIKE ?")
+            args.append(f'%"{topic}"%')
         if has_article:
             where.append("has_article = 1")
         if missing_article_text:
@@ -459,9 +500,10 @@ class Store:
         args: list[Any] = []
 
         if not include_searched:
-            # 默认只给订阅采集的内容。现查缓存是调用方随口给的 query 捞回来的，
-            # 混进信息流就会推给所有下游——只有 X 的降级链该看见它们。
-            where.append("origin = 'collected'")
+            # 默认只给订阅内容：账号采集（collected）与话题订阅（topic）都算——
+            # 话题写在配置里，属于「订阅配置决定的边界」。现查缓存（searched）
+            # 仍被挡在外面：那是调用方随口给的 query，只有 X 的降级链该看见它们。
+            where.append("origin IN ('collected', 'topic')")
 
         if platforms:
             where.append(f"platform IN ({','.join('?' * len(platforms))})")
@@ -677,7 +719,7 @@ def _row_to_item(row: sqlite3.Row) -> Item:
 
 def _row_to_tweet(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
-    for key in ("urls", "hashtags", "mentions", "media", "richtext_tags"):
+    for key in ("urls", "hashtags", "mentions", "media", "richtext_tags", "topics"):
         d[key] = json.loads(d.get(key) or "[]")
     for key in ("author_verified", "is_reply", "is_quote", "is_retweet",
                 "possibly_sensitive", "has_article"):

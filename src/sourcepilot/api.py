@@ -253,6 +253,10 @@ def create_app(
             str | None,
             Query(description="按形态过滤：repost|article|longform|link|quote|brief，逗号分隔"),
         ] = None,
+        topic: Annotated[
+            str | None,
+            Query(description="按订阅话题过滤（config/sources/x.yaml 的 topics[].name）"),
+        ] = None,
         since: Annotated[str | None, Query(description="ISO8601，只返回此后发布的")] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
@@ -294,7 +298,7 @@ def create_app(
         rows = store.query_tweets(
             tweet_types=wanted_types,
             q=q, handle=handle, conversation_id=conversation_id,
-            has_links=has_links, has_article=has_article, since=parsed_since,
+            has_links=has_links, has_article=has_article, topic=topic, since=parsed_since,
             # content_kind 是读取时算的派生字段，SQL 里没有，所以在这一层过滤。
             # 多取一些再筛，避免过滤后不够 limit。
             # content_kind 是读取时算的派生字段，SQL 里没有，只能取出来再筛——

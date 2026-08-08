@@ -76,10 +76,18 @@ class XRouter:
 
     # ---------- 对外能力 ----------
 
-    def search(self, query: str, limit: int, cursor: str | None = None):
+    def search(
+        self,
+        query: str,
+        limit: int,
+        cursor: str | None = None,
+        product: str = "Latest",
+    ):
         """搜索只有 GraphQL 一条路——免登录路径实测已全部关闭。"""
         return self._run(
-            [self.graphql], lambda b: b.search(query, limit, cursor), f"搜索 {query!r}"
+            [self.graphql],
+            lambda b: b.search(query, limit, cursor, product),
+            f"搜索 {query!r}",
         )
 
     def timeline(self, handle: str, limit: int, cursor: str | None = None):
@@ -204,14 +212,15 @@ TWEET_SINK = _TweetSink()
 
 
 def collect_x(config: SourceConfig) -> list[Item]:
-    """定时采集入口：把配置里关注的账号的时间线抓进库，供缓存兜底用。
+    """定时采集入口：账号时间线 + 话题搜索，两条订阅腿走同一轮。
 
+    账号订阅盖「官方说了什么」，话题订阅盖「某个事件下大家在说什么」。
     契约规定 `search_x` 现查失败要能降级回缓存——库里得先有东西，那个降级才有意义。
     """
     # accounts 是 ChannelAccount（公众号那边要 fakeid 才加的）。X 只认 handle，
     # 取 name 即可——但不能直接传对象，下游要对它做字符串操作。
     handles = [getattr(a, "name", a) for a in (config.accounts or [])]
-    if not handles:
+    if not handles and not config.topics:
         return []
 
     router = XRouter(nitter_instances=config.nitter_instances or None)
@@ -227,9 +236,47 @@ def collect_x(config: SourceConfig) -> list[Item]:
             log.warning("X 取 @%s 时间线失败：%s", handle, exc.code.value)
             continue
 
+    # ── 话题订阅（事件追踪）───────────────────────────────
+    # 结果不并入返回值：引擎会把返回的 items 统一按 collected 落库，而话题
+    # 内容要标 origin=topic（升级链 collected > topic > searched），只能在
+    # 这里用 TWEET_SINK 的 store 单独入库。没绑定 store（测试/一次性脚本）
+    # 时跳过话题采集——丢的是附加视图，账号主线不受影响。
+    topic_tags: list[tuple[str, list[str]]] = []
+    if config.topics and TWEET_SINK.store is not None:
+        for topic in config.topics:
+            try:
+                fetched, records, _ = router.search(
+                    topic.query,
+                    topic.limit,
+                    product="Top" if topic.sort == "top" else "Latest",
+                )
+            except SourcePilotError as exc:
+                # 单个话题失败不拖垮别的话题，更不拖垮账号主线
+                log.warning("X 话题「%s」搜索失败：%s", topic.name, exc.code.value)
+                continue
+            if topic.min_likes > 0:
+                # 采集侧兜底阈值（确定性规则）。query 里的 min_faves: 在上游
+                # 生效，这道闸挡的是上游语法失效（X 改版）后涌进来的裸结果。
+                kept_ids = {
+                    r.tweet_id for r in records if (r.likes or 0) >= topic.min_likes
+                }
+                records = [r for r in records if r.tweet_id in kept_ids]
+                fetched = [
+                    it for it in fetched if it.id.split(":", 1)[-1] in kept_ids
+                ]
+            if not records:
+                continue
+            TWEET_SINK.store.upsert_items(fetched, origin="topic")
+            tweet_records.extend(records)
+            topic_tags.append((topic.name, [r.tweet_id for r in records]))
+
     # 长文正文单独补。放在写库之后：推文先落地，正文补不到也不影响主线。
     router.fill_articles(tweet_records, TWEET_SINK.store)
     TWEET_SINK.write(tweet_records)
+    # 打标必须在 write 之后——tag 是对已存在行的合并更新
+    if TWEET_SINK.store is not None:
+        for name, ids in topic_tags:
+            TWEET_SINK.store.tag_tweet_topics(ids, name)
     return items
 
 

@@ -207,6 +207,39 @@ class ChannelAccount(BaseModel):
         return cls(name=value) if isinstance(value, str) else value
 
 
+class ChannelTopic(BaseModel):
+    """channel 要订阅的一个话题（事件追踪）。目前只有 X channel 用。
+
+    账号订阅盖住「官方说了什么」，话题订阅盖住「某个事件下大家在说什么」——
+    两条腿走同一套定时采集、限流与降级。**这是订阅配置而不是随口现查**：
+    契约 §5.3 的边界原则是「信息流内容由订阅配置决定」，写在这里的话题
+    属于配置，其结果标 origin=topic 进信息流；`search_x` 的临时 query
+    仍标 searched、仍不进信息流，两者互不影响。
+
+    噪音控制是两道确定性闸门（铁律：采集侧不做语义判断）：
+
+    1. `query` 直接用 X 搜索语法，`min_faves:`/`lang:` 这类过滤在上游就生效，
+       省配额也省得捞回来再丢；
+    2. `min_likes` 是采集侧兜底阈值——上游语法失效（X 改版）时它还在。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="话题标识（进 x_tweets.topics 与 ?topic= 过滤），建议 kebab-case")
+    query: str = Field(description="X 搜索语法原样透传，如 '\"GPT-5.6\" min_faves:50 lang:en'")
+    limit: int = Field(default=20, ge=1, le=50, description="每轮每话题最多取多少条")
+    min_likes: int = Field(
+        default=0, ge=0, description="采集侧确定性阈值：点赞数低于此值的丢弃（0 = 不过滤）"
+    )
+    sort: Literal["top", "latest"] = Field(
+        default="top",
+        description=(
+            "top = X 的热门排序（事件追踪的默认——要的是热度，X 排好了不必自己攒）；"
+            "latest = 按时间倒序（只在想要实时流水时用）"
+        ),
+    )
+
+
 class SourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -258,6 +291,14 @@ class SourceConfig(BaseModel):
         description=(
             "channel 专用：要订阅的账号列表。写字符串就是账号名；"
             "公众号建议写成 `{name, fakeid}`，见 ChannelAccount 的说明。"
+        ),
+    )
+    topics: list[ChannelTopic] = Field(
+        default_factory=list,
+        description=(
+            "channel 专用（目前仅 X）：话题订阅列表，定时跑搜索做事件追踪。"
+            "结果标 origin=topic 进信息流，与账号订阅（collected）平级；"
+            "详见 ChannelTopic 的说明与契约 §5.5。"
         ),
     )
     backends: list[str] = Field(

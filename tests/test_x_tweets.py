@@ -897,3 +897,91 @@ class TestTypeFilterIsPushedToSql:
         self._add(store, "o")
         got = store.query_tweets(tweet_types={"repost", "original"}, limit=10)
         assert len(got) == 2
+
+
+class TestTopicSubscription:
+    """话题订阅（契约 §5.5）：标签合并、查询过滤、信息流边界。"""
+
+    def _record(self, store, tweet_id, **over):
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        base = {"tweet_id": tweet_id, "author_handle": "zhangsan", "text": f"正文{tweet_id}",
+                "fetched_at": NOW, "created_at": NOW}
+        store.upsert_tweets([TweetRecord(**{**base, **over})])
+
+    def test_tag_merges_and_deduplicates(self, store):
+        self._record(store, "1")
+        assert store.tag_tweet_topics(["1"], "gpt-5.6") == 1
+        assert store.tag_tweet_topics(["1"], "opus-5") == 1
+        # 重复打同一个标签是幂等的
+        assert store.tag_tweet_topics(["1"], "gpt-5.6") == 0
+        (row,) = store.query_tweets(limit=10)
+        assert sorted(row["topics"]) == ["gpt-5.6", "opus-5"]
+
+    def test_recollect_does_not_wipe_topics(self, store):
+        """时间线重抓整行覆盖，但 topics 不在覆盖列里——标签必须留下。"""
+        self._record(store, "1", likes=1)
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+        self._record(store, "1", likes=99)  # 重抓刷新互动数
+        (row,) = store.query_tweets(limit=10)
+        assert row["likes"] == 99
+        assert row["topics"] == ["gpt-5.6"]
+
+    def test_query_filters_by_topic(self, store):
+        self._record(store, "1")
+        self._record(store, "2")
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+        rows = store.query_tweets(topic="gpt-5.6", limit=10)
+        assert [r["tweet_id"] for r in rows] == ["1"]
+        # 标签不存在 → 空结果而不是全量
+        assert store.query_tweets(topic="nope", limit=10) == []
+
+    def test_tagging_missing_tweet_is_noop(self, store):
+        assert store.tag_tweet_topics(["ghost"], "gpt-5.6") == 0
+
+    @staticmethod
+    def _item(item_id: str):
+        from sourcepilot.contracts import Item, Source, SourceType, TimeBasis
+
+        return Item(
+            id=item_id,
+            source=Source(type=SourceType.X, name="X / Twitter"),
+            title=f"推文 {item_id}",
+            url=f"https://x.com/i/status/{item_id.split(':')[-1]}",
+            published_at=None,
+            discovered_at=NOW,
+            time_basis=TimeBasis.DISCOVERED,
+            score=0.0,
+        )
+
+    def test_topic_items_enter_feed_but_searched_stay_out(self, store):
+        store.upsert_items([self._item("x:t1")], origin="topic")
+        store.upsert_items([self._item("x:s1")], origin="searched")
+        ids = {i.id for i in store.query_items(limit=10)}
+        assert "x:t1" in ids  # 话题是订阅配置，进信息流
+        assert "x:s1" not in ids  # 随口现查仍被挡住
+
+    def test_origin_upgrades_searched_to_topic_not_backwards(self, store):
+        store.upsert_items([self._item("x:a")], origin="searched")
+        store.upsert_items([self._item("x:a")], origin="topic")
+        assert {i.id for i in store.query_items(limit=10)} == {"x:a"}
+        # collected 不会被 topic 降级
+        store.upsert_items([self._item("x:b")], origin="collected")
+        store.upsert_items([self._item("x:b")], origin="topic")
+        with store._conn() as conn:
+            row = conn.execute("SELECT origin FROM items WHERE id='x:b'").fetchone()
+        assert row["origin"] == "collected"
+
+    def test_endpoint_topic_param(self, store):
+        from fastapi.testclient import TestClient
+
+        from sourcepilot.api import create_app
+
+        self._record(store, "1")
+        self._record(store, "2")
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+        client = TestClient(create_app(store=store))
+        body = client.get("/api/v1/x/tweets", params={"topic": "gpt-5.6"}).json()
+        tweets = body["data"]["tweets"]
+        assert [t["tweet_id"] for t in tweets] == ["1"]
+        assert tweets[0]["topics"] == ["gpt-5.6"]

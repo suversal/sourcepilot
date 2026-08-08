@@ -371,7 +371,7 @@ class GraphQLBackend:
             raise UpstreamDown("X GraphQL 返回的不是 JSON") from exc
 
     def search(
-        self, query: str, limit: int, cursor: str | None = None
+        self, query: str, limit: int, cursor: str | None = None, product: str = "Latest"
     ) -> tuple[list[Item], str | None]:
         account = self.pool.acquire("SearchTimeline")
         # 参数照抄浏览器里的真实请求（2026-07-26 抓取）。
@@ -379,7 +379,10 @@ class GraphQLBackend:
             "rawQuery": query,
             "count": min(limit, 20),
             "querySource": "",
-            "product": "Latest",  # 按时间倒序，不是「热门」——资讯要的是最新
+            # Latest = 按时间倒序（search_x 现查用：资讯要最新）；
+            # Top = X 自己的热门排序（话题订阅用：事件追踪要的是热度，
+            # 综合互动量/作者权重/传播速度，X 排好了不必自己攒）。
+            "product": product,
             "withGrokTranslatedBio": False,
             "withQuickPromoteEligibilityTweetFields": False,
         }
