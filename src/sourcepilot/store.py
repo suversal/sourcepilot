@@ -142,6 +142,15 @@ CREATE TABLE IF NOT EXISTS cooldowns (
     error_code  TEXT NOT NULL
 );
 
+-- 已经推送过的告警。存库而不是存内存：进程重启不该把「这个源我已经报过了」
+-- 忘掉——否则每次重启都会把同一批陈年故障重推一遍，而告警一吵人就不看了。
+-- 只记推送时的健康度，判定本身每轮由 Canary 重算。
+CREATE TABLE IF NOT EXISTS alert_state (
+    name        TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    notified_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS source_state (
     name                 TEXT PRIMARY KEY,
     last_attempt_at      TEXT,
@@ -668,6 +677,25 @@ class Store:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+
+    def alert_states(self) -> dict[str, str]:
+        """已推送过告警的源 → 推送时的健康度。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT name, status FROM alert_state").fetchall()
+        return {r["name"]: r["status"] for r in rows}
+
+    def set_alert_state(self, name: str, status: str, at: datetime) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO alert_state VALUES (?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET status=excluded.status, "
+                "notified_at=excluded.notified_at",
+                (name, status, _iso(at)),
+            )
+
+    def clear_alert_state(self, name: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM alert_state WHERE name=?", (name,))
 
     def save_cooldown(self, key: str, until: datetime, code: str) -> None:
         with self._conn() as conn:

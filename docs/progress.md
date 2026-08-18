@@ -28,7 +28,7 @@
 | 1 | 冻结工具契约 | ✅ 完成 | [contract.md](contract.md) v1.9.0、`src/sourcepilot/contracts/` | 26 项契约不变量测试（`tests/test_contracts.py`） |
 | 2 | REST + SKILL.md + 信源接入 | ✅ 完成 | 声明式引擎（JSON/HTML/RSS）、24 个信源、7 个端点、后台调度器、[SKILL.md](../SKILL.md） | 298 项离线测试 + 真实 curl 验证；SKILL.md 已逐条走查并修掉端口/缺路由/自相矛盾三处硬伤 |
 | 3 | X 后端（签名/账号池/限流） | ✅ 完成 | 三后端路由、账号池 + 限流状态机、`x-client-transaction-id` 签名、`search_x` 现查降级链、两个 REST 端点 | 39 项离线测试 + **现场搜 X 真实跑通**（10 条实时结果 6.1s，带游标）；调度器已自动采集 |
-| 4 | 可靠性层（Canary/故障转移/代理） | 🔶 Canary + 冷却持久化完成，代理未做（T8） | `canary.py` 三级健康判定 + `/health` 暴露 | 13 项测试 + 真实注入故障验证（能报出连续失败与落后，整体 ok 正确翻转）。代理轮换未做 |
+| 4 | 可靠性层（Canary/故障转移/代理） | 🔶 Canary + 冷却持久化 + 中断告警完成，代理未做（T8） | `canary.py` 三级健康判定 + `/health` 暴露 | 13 项测试 + 真实注入故障验证（能报出连续失败与落后，整体 ok 正确翻转）。代理轮换未做 |
 | 5 | MCP 出口 | ✅ 完成 | `mcp_server.py`（与 api.py 平级，零业务逻辑）、`ToolSpec` 协议无关的工具定义 | 11 项测试（含 3 项 REST/MCP 一致性对照）+ 真实 stdio 客户端跑通六个工具 |
 | 6 | 迁 RSS + 公众号 channel | ✅ 完成 | RSS 提取器、公众号 channel（mp 后端 + 冷却状态机）、`/api/v1/wechat/feed` | 27 项离线测试 + **真实凭据端到端跑通**：量子位/机器之心共 34 条入库 |
 
@@ -93,7 +93,11 @@ P2 = 体验问题**。
 复测确认源还能抓 44 条、格式完整，但最新一篇是 2025-09-22。**抓得到旧内容比抓不到更危险**——
 采集成功、Canary 全绿、下游却会以为「Qwen 最近没发布」。理由与复开条件写在 [qwen.yaml](../config/sources/qwen.yaml) 文件头。
 真要恢复得找 qwen.ai 的列表 API，属重逻辑而非改配置 |
-| T12 | **P0** | 采集中断告警 | **这次事故真正的教训**：公众号线 08-08 就停了，直到 08-17 才被发现——中间 9 天，`/health` 一直能查出来，但没人去查。Canary 已有三级健康判定，缺的是「连续 N 轮失败就主动吼一声」的出口（日志之外的推送/邮件/webhook 任选其一）。**这条比修任何一个源都重要**：一个源坏掉是必然的，9 天发现不了才是问题 |
+| ~~T12~~ | ✅ 已完成 | ~~采集中断告警~~ | **这次事故真正的教训**：公众号线 08-08 就停了，直到 08-17 才被发现——中间 9 天，`/health` 一直能查出来，但没人去查。Canary 已有三级健康判定，缺的是「连续 N 轮失败就主动吼一声」的出口（日志之外的推送/邮件/webhook 任选其一）。**这条比修任何一个源都重要**：一个源坏掉是必然的，9 天发现不了才是问题。
+**2026-08-18 完成**：`alert.py` 走 Telegram（与 AIRADAR 的 `telegram_notifier` 同一对环境变量，
+同一个机器人直接复用）。只在状态转换时推（`degraded` 不推，太吵）；已推送状态存 `alert_state` 表
+（重启不重推）；推送失败不更新状态、下轮重试（先记后发会永久吞掉告警）；best-effort，
+绝不阻塞采集。真实通道已验证，生产库 dry-run 正确推出 bilibili + wechat 两条 |
 | T13 | P1 | weread 撞验证码后的降级行为 | 现在撞了 CAPTCHA 就整条线停在那，库里的旧文照常提供（这部分是对的），但**没有任何对外信号**说「这个源的数据不新了」。契约有 `meta.stale`，`/wechat/feed` 该在后端处于验证码冷却期时把它置上，让下游知道手里是旧数据 |
 | T9 | P2 | `/items` 按公众号过滤（或 `/wechat/feed` 加 `since`） | AIRADAR Phase 1 接入实测发现（2026-08-04）：`/items` 的 `platform` 白名单只认信源配置名（`wechat` 整体算一个），不认具体公众号名；按号过滤只能走 `/wechat/feed`，而它没有 `since` 参数（契约 §4 如此）。下游已用 `/wechat/feed` + 客户端水位过滤落地，本机毫秒级查询下没有实际代价，所以只是 P2。真做时二选一：platform 白名单纳入公众号名，或 `/wechat/feed` 加 `since`（加可选参数属 minor） |
 
@@ -186,4 +190,5 @@ P2 = 体验问题**。
 | （中间提交见 git log） | 字节 Seed 博客流、X 推文全貌 `x_tweets`、长文抓取、转发识别、GraphQL-first 等，契约推进至 1.6.0 |
 | `f954e41` | 富文本样式落地（契约 1.7.0）：article 正文补行内加粗/斜体；note 长推的 `richtext_tags` 入库并织进 `display_text`；库存 3 篇 article 已重取带样式 |
 | （近期提交） | 配图拼进 `display_text`（契约 1.8.0）：图片 `![](url)` 织入/追加，视频给可点击缩略图，正文里指向媒体的 t.co 残链清掉；article 不重复拼（配图已内嵌） |
-| 本次 | 发布前整理：修 `read_article` 在 fake-ip 代理下全拒（并把 SSRF 测试的 DNS 打桩，536 项真离线）；补 `trafilatura` 硬依赖与 `mcp` 可选依赖声明；`.gitignore` 补上漏掉的 `weread_collector.yaml`（含真实 cookie）与 `.claude/`；停用失效的 `qwen` 源；补 weread / 公众平台凭据模板；README 与本文件的数字、信源清单、公众号名单全部按库里实测值刷新 |
+| `b56a328` | 发布前整理：修 `read_article` 在 fake-ip 代理下全拒（并把 SSRF 测试的 DNS 打桩，536 项真离线）；补 `trafilatura` 硬依赖与 `mcp` 可选依赖声明；`.gitignore` 补上漏掉的 `weread_collector.yaml`（含真实 cookie）与 `.claude/`；停用失效的 `qwen` 源；补 weread / 公众平台凭据模板；README 与本文件的数字、信源清单、公众号名单全部按库里实测值刷新 |
+| 本次 | 采集中断告警（T12）：Canary 判定发生转换时推 Telegram，复用 AIRADAR 那个机器人。9 天没发现故障的直接对策 |

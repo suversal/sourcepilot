@@ -163,12 +163,17 @@ class Scheduler:
         tick_seconds: float = 60.0,
         retention=None,
         sweep_every: float = 6 * 3600,
+        alerter=None,
     ) -> None:
         self.collector = collector
         self.tick_seconds = tick_seconds
         #: 保留策略。给 None 就不清理——测试和一次性脚本不该动数据。
         self.retention = retention
         self.sweep_every = sweep_every
+        #: 采集中断告警。给 None 就不告警（没配 Telegram 时就是这样）。
+        #: 挂在采集之后同一个线程里：它只读状态、不出网抓取，成本可忽略，
+        #: 而串行能保证判定看到的就是刚刚这一轮的结果。
+        self.alerter = alerter
         self._last_sweep = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -199,6 +204,13 @@ class Scheduler:
                     log.info("定时采集：%d 个源到点，%d 个成功", len(outcomes), ok)
             except Exception:  # 调度线程绝不能因为单次异常而死掉
                 log.exception("定时采集出错，下一轮继续")
+
+            # 告警是「出问题时才用」的东西，它自己出问题不能反过来影响采集。
+            if self.alerter is not None:
+                try:
+                    self.alerter.poll()
+                except Exception:
+                    log.exception("采集告警出错，不影响采集")
 
             # 清理挂在采集之后、同一个线程里——它是低频操作，不值得单开线程，
             # 而且和采集串行能避免「边删边写」。

@@ -440,9 +440,51 @@ extract:
 ```json
 {
   "ok": true,
-  "canary": { "counts": {"ok": 24, "idle": 2}, "problems": [] }
+  "canary": { "counts": {"ok": 32, "degraded": 1, "down": 2, "idle": 15}, "problems": [] }
 }
 ```
+
+### 采集中断告警
+
+Canary 判得再准也有一个前提：**得有人去看**。2026-08-08 公众号线因为出口 IP
+被风控而停掉，到 08-17 才被发现——中间 9 天里 `/health` 每一次都如实报着 `down`。
+**一个源坏掉是必然的，9 天发现不了才是真问题。**
+
+所以加了一层主动推送（Telegram）：
+
+```bash
+export TELEGRAM_BOT_TOKEN=...   # 与 AIRADAR 的 telegram_notifier 同名，同一个机器人可复用
+export TELEGRAM_CHAT_ID=...
+python -m sourcepilot.alert --test    # 先验通道
+python -m sourcepilot.alert           # 检查一次并按需推送（也可挂 cron 兜底）
+```
+
+配了这两个变量，API 进程的调度器每轮采集后自动检查；没配就整段跳过，其余功能不受影响。
+
+```
+🛰 SourcePilot 采集告警
+
+❌ wechat：连续失败 39 次（最后一次：CAPTCHA）
+   上次成功 08-07 14:57Z（10.5 天前）
+
+✅ 已恢复：bilibili
+
+35 个源：ok 32 · degraded 1 · down 2
+```
+
+三条刻意的约定：
+
+**只在状态转换时发**。`→ down` 一条，`down →` 恢复一条。一个源一直坏着不会每分钟
+吵一次；`degraded` 根本不发——落后几分钟、条目数掉一半这类波动太频繁，
+**告警一吵人就不看了，那等于回到没有告警**。
+
+**已推送状态存库**（`alert_state` 表）而不是存内存，否则每次重启都会把同一批
+陈年故障重推一遍。
+
+**推送失败不更新状态**，下一轮自然重试。反过来做（先记已通知、再发送）会让一次
+网络抖动永久吞掉一条告警——而告警恰恰是出问题时才用的东西，那时候网络本来更可能不好。
+
+发送本身是 best-effort：绝不抛异常、绝不阻塞采集。告警挂掉是小事，把调度线程带崩是大事。
 
 ### 业务错误码识别
 

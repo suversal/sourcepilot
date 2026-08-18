@@ -27,6 +27,12 @@ FAKE_IP_CIDRS = os.getenv(
     "SOURCEPILOT_FAKE_IP_CIDRS", "198.18.0.0/15,fdfe:dcba:9876::/48"
 )
 
+#: 采集中断告警的 Telegram 通道。**与 AIRADAR 的 telegram_notifier 同名**，
+#: 同一个机器人可以直接复用（两边发的东西不同，共用通道没问题）。
+#: 两个都不填 = 不推送，其余功能不受影响。见 alert.py。
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
 DEFAULT_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

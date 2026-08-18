@@ -17,6 +17,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from . import __version__
+from .alert import Alerter
+from .alert import configured as alert_configured
 from .article import ArticleService
 from .canary import Canary
 from .channels.cooldown import COOLDOWNS
@@ -86,7 +88,10 @@ def create_app(
     x_search = XSearchService(store)
     x_timeline = XTimelineService(store)
     retention = Retention(store)
-    background = Scheduler(collector, retention=retention)
+    # 配了 Telegram 才装告警。没配就是 None，调度器整段跳过——
+    # 这条线挂了或没配，都不该影响采集本身。
+    alerter = Alerter(canary, store) if alert_configured() else None
+    background = Scheduler(collector, retention=retention, alerter=alerter)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
