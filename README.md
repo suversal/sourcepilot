@@ -593,6 +593,11 @@ Claude Desktop 之类的客户端配置：
 
 `env` 里的 `PYTHONPATH` 不能省——MCP 客户端会清理环境变量。
 
+SDK 按需装：`pip install -e ".[mcp]"`。**1.x 与 2.x 都支持**——mcp 2.0 把低层
+`Server` 的装饰器 API 换成了构造参数回调，两套不共存，所以 `create_server()`
+按能力探测分流（探的是我们真正依赖的那个方法在不在，不读版本号）。
+CI 里两个大版本各跑一档，钉的是「两版都能起」而不是钉住一个版本躲过去。
+
 MCP 的 tool schema 由契约的 pydantic 模型直接生成，**参数定义只有一份**，
 REST 与 MCP 不可能对不上（有专门的一致性对照测试）。
 

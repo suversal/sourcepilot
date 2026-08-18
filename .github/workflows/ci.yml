@@ -42,9 +42,21 @@ jobs:
       - name: pytest
         run: pytest -q
 
-  # MCP 出口单独一档：装上 SDK 再跑一遍，确认 optional extra 声明是对的。
+  # MCP 出口单独一档，并且**两个 SDK 大版本都跑**。
+  # 这一档是有来历的：第一次 CI 就在这里红了——mcp 2.0 把低层 Server 的装饰器
+  # 换成了构造参数回调，本机装的 1.x 全绿、干净环境装到 2.x 整个出口起不来。
+  # 所以这里钉的是「两版都能起」，而不是钉一个版本躲过去。
   mcp:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: "mcp>=1.2,<2"
+            label: "1.x（装饰器 API）"
+          - sdk: "mcp>=2"
+            label: "2.x（回调 API）"
+    name: mcp ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,12 +65,20 @@ jobs:
           cache: pip
       - run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,mcp]"
-      - name: 构造 MCP Server（要装了 mcp 才跑得起来）
+          pip install -e ".[dev]" "${{ matrix.sdk }}"
+      - name: 报一下实际装到的版本
+        run: python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+      - name: 构造 MCP Server 并调用两个 handler
         run: |
           python -c "
+          import mcp.types as types
           from sourcepilot.mcp_server import create_server, tool_schemas
-          create_server()
+          server = create_server()
+          if hasattr(server, 'get_request_handler'):
+              entry = server.get_request_handler('tools/list')
+              assert entry is not None, 'tools/list 没注册'
+          else:
+              assert types.ListToolsRequest in server.request_handlers, 'tools/list 没注册'
           names = [s['name'] for s in tool_schemas()]
           print('MCP 工具:', names)
           assert len(names) >= 6, names

@@ -115,24 +115,48 @@ def call_tool(
 def create_server(
     store: Store | None = None, sources: dict[str, SourceConfig] | None = None
 ):
-    """构造 MCP Server。延迟导入 SDK，让不装 mcp 的环境也能 import 本模块。"""
+    """构造 MCP Server。延迟导入 SDK，让不装 mcp 的环境也能 import 本模块。
+
+    **兼容 mcp 1.x 与 2.x 两套低层 API**。2.0 把装饰器（`@server.list_tools()`）
+    换成了构造参数回调（`on_list_tools=`），两套不共存——1.x 的写法在 2.0 上直接
+    `AttributeError`。这不是能靠钉版本躲过去的事：`pip install "sourcepilot[mcp]"`
+    今天装到的就是 2.x，而钉住上界等于让新装的人拿不到 SDK 的安全修复。
+
+    分流按**能力探测**而不是读版本号：探的正是我们真正依赖的那个方法在不在，
+    所以 SDK 哪天把装饰器加回来、或者再改一次版本号规则，这里都不用跟着动。
+
+    两条路产出的服务器行为一致，工具定义仍然只有一份（`tool_schemas()`）——
+    协议壳换了，那「一套核心」没动。
+    """
     import mcp.types as types
     from mcp.server import Server
 
     handlers = build_handlers(store, sources)
-    server = Server("sourcepilot")
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return [types.Tool(**s) for s in tool_schemas()]
+    if hasattr(Server, "list_tools"):  # mcp 1.x：装饰器注册
+        server = Server("sourcepilot")
 
-    @server.call_tool()
-    async def handle(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
-        return [
-            types.TextContent(type="text", text=call_tool(name, arguments or {}, handlers))
-        ]
+        @server.list_tools()
+        async def list_tools() -> list[types.Tool]:
+            return [types.Tool(**s) for s in tool_schemas()]
 
-    return server
+        @server.call_tool()
+        async def handle(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
+            return [
+                types.TextContent(type="text", text=call_tool(name, arguments or {}, handlers))
+            ]
+
+        return server
+
+    # mcp >= 2.0：构造参数回调，返回值也从「内容列表」变成了完整的 Result 对象。
+    async def on_list_tools(_ctx: Any, _params: Any) -> Any:
+        return types.ListToolsResult(tools=[types.Tool(**s) for s in tool_schemas()])
+
+    async def on_call_tool(_ctx: Any, params: Any) -> Any:
+        text = call_tool(params.name, params.arguments or {}, handlers)
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
+
+    return Server("sourcepilot", on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 async def _run() -> None:

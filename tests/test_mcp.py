@@ -106,3 +106,57 @@ class TestRestAndMcpAgree:
     def test_contract_version_matches(self, store, sources):
         mcp, rest = self._both(store, sources, "get_feed", {"limit": 1}, "/items")
         assert mcp["meta"]["contract_version"] == rest["meta"]["contract_version"]
+
+
+mcp_sdk = pytest.importorskip("mcp", reason="没装 mcp SDK（它是可选依赖）")
+
+
+class TestCreateServer:
+    """构造真正的 MCP Server。
+
+    这组用例是补上来的——**CI 第一次跑就抓到了这里的空白**：mcp 2.0 把低层
+    Server 的装饰器 API（`@server.list_tools()`）换成了构造参数回调，1.x 的写法
+    在 2.0 上直接 `AttributeError`。而当时所有 MCP 测试都只覆盖协议无关的那半
+    （`tool_schemas` / `call_tool`），构造服务器这一步没人碰，于是在本机（1.x）
+    全绿、在干净环境（装到 2.x）整个出口起不来。
+    """
+
+    @staticmethod
+    def _handler(server, method: str, request_type):
+        """跨 SDK 大版本取回注册好的 handler。
+
+        2.0 按 method 字符串注册并返回 HandlerEntry；1.x 用请求类型做键。
+        """
+        if hasattr(server, "get_request_handler"):  # mcp >= 2.0
+            entry = server.get_request_handler(method)
+            return entry.handler if entry is not None else None
+        return server.request_handlers.get(request_type)
+
+    def test_server_constructs(self, store, sources):
+        from sourcepilot.mcp_server import create_server
+
+        server = create_server(store=store, sources=sources)
+        assert server is not None
+
+    def test_both_tool_methods_are_registered(self, store, sources):
+        """tools/list 与 tools/call 都得挂上——少一个，客户端就看不到工具或调不动。"""
+        import mcp.types as types
+
+        from sourcepilot.mcp_server import create_server
+
+        server = create_server(store=store, sources=sources)
+        assert self._handler(server, "tools/list", types.ListToolsRequest) is not None
+        assert self._handler(server, "tools/call", types.CallToolRequest) is not None
+
+    def test_tool_definitions_come_from_the_contract(self, store, sources):
+        """六个工具、schema 由契约的 pydantic 模型生成——**定义只有一份**。"""
+        import mcp.types as types
+
+        from sourcepilot.mcp_server import create_server
+
+        create_server(store=store, sources=sources)  # 构造不抛就够，定义本身在下面对
+        tools = [types.Tool(**schema) for schema in tool_schemas()]
+        assert len(tools) == len(TOOL_REGISTRY)
+        # 字段在 1.x 叫 inputSchema、2.0 叫 input_schema（camelCase 仍作 alias 接受）
+        schema = getattr(tools[0], "input_schema", None) or tools[0].inputSchema
+        assert schema["type"] == "object"
