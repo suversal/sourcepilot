@@ -7,6 +7,48 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+
+def load_dotenv(path: Path) -> dict[str, str]:
+    """把 `.env` 里的键值读进环境变量，**已存在的不覆盖**，返回实际注入的那些。
+
+    为什么进程自己读、而不是交给启动方式：凭据不能进仓库（`.idea/` 是跟着仓库
+    走的，写进运行配置的 XML 等于直接推上 GitHub），而 IDEA 启动、命令行 uvicorn、
+    cron 三条起法各有各的环境。自己读一份 `.env` 是唯一让三者拿到同一份配置的
+    办法，也不必为此加 python-dotenv 依赖——需要的就是这十几行。
+
+    真实环境变量优先（用 `setdefault`）：部署时用系统环境覆盖文件里的值是常规做法，
+    反过来会让人怎么 export 都不生效。
+    """
+    injected: dict[str, str] = {}
+    if not path.exists():
+        return injected
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:  # 读不到就当没有，配置文件坏了不该让服务起不来
+        return injected
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = line.removeprefix("export ").lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        # 去掉成对的引号；值里面的引号原样保留（token 里不会有，但别乱改人家的值）
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+            injected[key] = value
+    return injected
+
+
+#: 项目根的 .env。已在 .gitignore 里，模板见 .env.example。
+DOTENV_FILE = Path(os.getenv("SOURCEPILOT_DOTENV", PROJECT_ROOT / ".env"))
+load_dotenv(DOTENV_FILE)
+
 SOURCES_DIR = Path(os.getenv("SOURCEPILOT_SOURCES_DIR", PROJECT_ROOT / "config" / "sources"))
 CATEGORIES_FILE = Path(
     os.getenv("SOURCEPILOT_CATEGORIES_FILE", PROJECT_ROOT / "config" / "categories.yaml")

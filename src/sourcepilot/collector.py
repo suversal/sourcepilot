@@ -186,7 +186,13 @@ class Scheduler:
             target=self._loop, name="sourcepilot-scheduler", daemon=True
         )
         self._thread.start()
-        log.info("调度器已启动，每 %.0fs 检查一次到点的源", self.tick_seconds)
+        # 把告警是否装上一起报出来：没配 Telegram 时它静默跳过，而「告警悄悄没启用」
+        # 恰恰是这层最不该有的失效方式——启动日志里说一句，IDEA 控制台一眼就能确认。
+        log.info(
+            "调度器已启动，每 %.0fs 检查一次到点的源；采集中断告警：%s",
+            self.tick_seconds,
+            "已启用" if self.alerter is not None else "未配置（TELEGRAM_BOT_TOKEN / CHAT_ID）",
+        )
 
     def stop(self, timeout: float = 5.0) -> None:
         if self._thread is None:

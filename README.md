@@ -453,13 +453,18 @@ Canary 判得再准也有一个前提：**得有人去看**。2026-08-08 公众�
 所以加了一层主动推送（Telegram）：
 
 ```bash
-export TELEGRAM_BOT_TOKEN=...   # 与 AIRADAR 的 telegram_notifier 同名，同一个机器人可复用
-export TELEGRAM_CHAT_ID=...
+cp .env.example .env      # 填 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
 python -m sourcepilot.alert --test    # 先验通道
 python -m sourcepilot.alert           # 检查一次并按需推送（也可挂 cron 兜底）
 ```
 
 配了这两个变量，API 进程的调度器每轮采集后自动检查；没配就整段跳过，其余功能不受影响。
+启动日志里会说明是哪种：`采集中断告警：已启用 / 未配置`——**「告警悄悄没启用」是这层
+最不该有的失效方式**，所以让它在控制台里一眼可见。
+
+`.env` 由 `settings.py` 自己读（真实环境变量优先），所以 **IDEA 启动、命令行 uvicorn、
+cron 三种起法拿到的是同一份配置**，不必在每个运行配置里各填一遍。凭据也**只能**放这里
+——`.idea/runConfigurations/*.xml` 是跟着仓库走的，写进去等于直接推上 GitHub。
 
 ```
 🛰 SourcePilot 采集告警
@@ -772,6 +777,7 @@ vs「上次拉取之后你们又收到了什么」。混用会让首次采集把
 | `config/x_accounts.example.yaml` | `config/x_accounts.yaml` | `search_x` / `get_x_timeline`（搜索必须登录态） |
 | `config/weread_credentials.example.yaml` | `config/weread_credentials.yaml` | 公众号采集的**主力路线**（微信读书） |
 | `config/wechat_credentials.example.yaml` | `config/wechat_credentials.yaml` | 公众平台 mp 后端（**列表接口当前不可用**，只剩查 fakeid 能用） |
+| `.env.example` | `.env` | 采集中断告警的 Telegram 通道，以及几个可选的运行时开关 |
 
 每个模板里都写了怎么取、哪些字段必须有、以及取错时会看到什么错误码。
 真实凭据文件已在 `.gitignore` 里，代码中也不会打印明文（`__repr__` 做了屏蔽）。

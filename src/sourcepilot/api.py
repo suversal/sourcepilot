@@ -90,7 +90,9 @@ def create_app(
     retention = Retention(store)
     # 配了 Telegram 才装告警。没配就是 None，调度器整段跳过——
     # 这条线挂了或没配，都不该影响采集本身。
-    alerter = Alerter(canary, store) if alert_configured() else None
+    # 也跟着 scheduler 开关：不跑后台采集的进程（测试、一次性脚本）没人会 poll 它，
+    # 装上只是让「本机恰好配了 Telegram」变成测试行为的一个变量。
+    alerter = Alerter(canary, store) if (scheduler and alert_configured()) else None
     background = Scheduler(collector, retention=retention, alerter=alerter)
 
     @asynccontextmanager

@@ -191,4 +191,5 @@ P2 = 体验问题**。
 | `f954e41` | 富文本样式落地（契约 1.7.0）：article 正文补行内加粗/斜体；note 长推的 `richtext_tags` 入库并织进 `display_text`；库存 3 篇 article 已重取带样式 |
 | （近期提交） | 配图拼进 `display_text`（契约 1.8.0）：图片 `![](url)` 织入/追加，视频给可点击缩略图，正文里指向媒体的 t.co 残链清掉；article 不重复拼（配图已内嵌） |
 | `b56a328` | 发布前整理：修 `read_article` 在 fake-ip 代理下全拒（并把 SSRF 测试的 DNS 打桩，536 项真离线）；补 `trafilatura` 硬依赖与 `mcp` 可选依赖声明；`.gitignore` 补上漏掉的 `weread_collector.yaml`（含真实 cookie）与 `.claude/`；停用失效的 `qwen` 源；补 weread / 公众平台凭据模板；README 与本文件的数字、信源清单、公众号名单全部按库里实测值刷新 |
-| 本次 | 采集中断告警（T12）：Canary 判定发生转换时推 Telegram，复用 AIRADAR 那个机器人。9 天没发现故障的直接对策 |
+| `64ae651` | 采集中断告警（T12）：Canary 判定发生转换时推 Telegram，复用 AIRADAR 那个机器人。9 天没发现故障的直接对策 |
+| 本次 | 配置落地：`settings.py` 自读项目根 `.env`（真实环境变量优先），让 IDEA / 命令行 / cron 三种起法共用一份配置——凭据不能写进 `.idea/runConfigurations/*.xml`，那些文件跟着仓库走。补 `.env.example`；启动日志报告告警是否启用；LICENSE 署名改 suversal |
