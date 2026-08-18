@@ -15,10 +15,13 @@ dependencies = [
     "lxml>=5.0",              # bs4 的解析后端
     "feedparser>=6.0",        # RSS/Atom 源
     "curl_cffi>=0.7",         # TLS 指纹伪装，对付 Cloudflare 挑战页
+    "trafilatura>=2.0",      # read_article 的通用正文提取（容器未知时的兜底）
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "ruff>=0.7"]
+# MCP 出口按需装：mcp_server.py 延迟导入 SDK，不装也能 import 本模块跑 REST。
+mcp = ["mcp>=1.2"]
 
 [build-system]
 requires = ["hatchling"]

@@ -484,7 +484,9 @@ class TestAccountsAcceptFakeid:
         from sourcepilot.channels.wechat.mp import Credentials, MpBackend, WechatClient
         from sourcepilot.sources.config import ChannelAccount
 
-        monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c")))
+        monkeypatch.setattr(
+            Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c"))
+        )
         monkeypatch.setattr(
             WechatClient, "search_account",
             lambda self, kw: pytest.fail("给了 fakeid 就不该再调搜索"),
@@ -502,7 +504,9 @@ class TestAccountsAcceptFakeid:
         from sourcepilot.channels.wechat.mp import Credentials, MpBackend, WechatClient
         from sourcepilot.sources.config import ChannelAccount
 
-        monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c")))
+        monkeypatch.setattr(
+            Credentials, "load", classmethod(lambda cls, path=None: Credentials("t", "c"))
+        )
         monkeypatch.setattr(WechatClient, "search_account", lambda self, kw: {"fakeid": "SEARCHED"})
         seen = {}
         monkeypatch.setattr(

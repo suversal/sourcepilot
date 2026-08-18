@@ -15,10 +15,17 @@ build/
 *.sqlite3
 data/
 .env
-config/accounts.yaml
-config/proxies.yaml
 
 .DS_Store
+
+# 凭据与运行时私密配置：一律不进仓库，模板走 *.example.yaml
+config/accounts.yaml
+config/proxies.yaml
+config/x_accounts.yaml
 config/wechat_credentials.yaml
 config/weread_credentials.yaml
-config/x_accounts.yaml
+config/weread_collector.yaml
+!config/*.example.yaml
+
+# 本机 Claude Code 设置（含绝对路径）
+.claude/

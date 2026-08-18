@@ -1,0 +1,66 @@
+name: CI
+
+# 测试全部离线（连 DNS 都是打桩的），所以这套 CI 不需要任何凭据或网络信源，
+# fork 上的 PR 也能跑绿。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 是 requires-python 的下界，3.13 是当前开发用的版本。
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # 只装 .[dev]，故意不装 mcp——这样能顺带钉住「不装 MCP SDK 也能 import
+      # 全部模块跑 REST」这条约定（mcp_server.py 是延迟导入）。
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: 导入自检（缺声明的依赖会在这里暴露，而不是等到运行时）
+        run: |
+          python -c "import sourcepilot.api, sourcepilot.mcp_server, sourcepilot.collector"
+
+      - name: ruff
+        run: ruff check src tests
+
+      - name: pytest
+        run: pytest -q
+
+  # MCP 出口单独一档：装上 SDK 再跑一遍，确认 optional extra 声明是对的。
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,mcp]"
+      - name: 构造 MCP Server（要装了 mcp 才跑得起来）
+        run: |
+          python -c "
+          from sourcepilot.mcp_server import create_server, tool_schemas
+          create_server()
+          names = [s['name'] for s in tool_schemas()]
+          print('MCP 工具:', names)
+          assert len(names) >= 6, names
+          "
+      - run: pytest -q tests/test_mcp.py

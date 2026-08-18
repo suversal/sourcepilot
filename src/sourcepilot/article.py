@@ -29,7 +29,7 @@ from .contracts import (
     Timeout,
     UpstreamDown,
 )
-from .settings import DEFAULT_UA
+from .settings import DEFAULT_UA, FAKE_IP_CIDRS
 
 log = logging.getLogger("sourcepilot.article")
 
@@ -37,13 +37,58 @@ log = logging.getLogger("sourcepilot.article")
 ALLOWED_PORTS = frozenset({80, 443, 8080, 8443})
 
 
+def _parse_cidrs(spec: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    nets = []
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(chunk, strict=False))
+        except ValueError:
+            log.warning("SOURCEPILOT_FAKE_IP_CIDRS 里的 %r 不是合法 CIDR，已忽略", chunk)
+    return tuple(nets)
+
+
+#: 见 settings.FAKE_IP_CIDRS。模块级解析一次；测试直接替换这个变量。
+FAKE_IP_NETS = _parse_cidrs(FAKE_IP_CIDRS)
+
+
+def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """host 本身就是 IP 字面量时返回它，是域名则返回 None。"""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
 def _is_public_ip(host: str) -> bool:
+    """解析 host，确认它指向的不是内网。
+
+    **fake-ip 例外**：Clash 这类代理在 fake-ip 模式下不做真实 DNS，而是把每个域名
+    映射到 198.18.0.0/16 里的一个占位地址（Python 把该段算作 private）。这种环境下
+    本地根本拿不到目标的真实 IP，照原样判定的结果是**所有公网域名一律被拒**，
+    `read_article` 整个工具失效。
+
+    放行占位地址不会削弱这道防护，因为 fake-ip 只作用于**域名**：
+
+    - 调用方给字面内网 IP（`http://192.168.1.1`）时不经 DNS，照旧被拦；
+    - 内网域名（`*.lan` 之类）在 fake-ip 模式下走真实解析，拿到的仍是私网地址，照旧被拦；
+    - 落在 fake-ip 段的只可能是代理决定要代出去的域名，够不到本机内网。
+
+    出网请求随后由代理按域名转发，真正的目标地址由它决定——这一层的取舍是明确的：
+    用代理就意味着把「这个域名去哪」交给了代理。不用代理的部署把
+    `SOURCEPILOT_FAKE_IP_CIDRS` 设成空串即可回到严格模式。
+    """
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
         return False
+    is_domain = _literal_ip(host) is None
     for info in infos:
         addr = ipaddress.ip_address(info[4][0])
+        if is_domain and any(addr in net for net in FAKE_IP_NETS):
+            continue  # 代理给域名的占位地址，不是内网地址
         if (
             addr.is_private
             or addr.is_loopback

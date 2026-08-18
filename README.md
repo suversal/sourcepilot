@@ -7,7 +7,7 @@
 这条边界贯穿全部设计，下文会反复提到它为什么重要。
 
 ```
-37 个信源 · 6 个工具 · 4 个出口 · 345 项测试
+35 个信源 · 6 个工具 · 4 个出口 · 536 项测试
 ```
 
 ---
@@ -74,74 +74,81 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 
 ## 信源清单
 
-37 个启用源，实测数据量（截至最近一次运行）：
+35 个启用源。条目数是库里的实测值（截至 2026-08-18，共 25100 条）：
 
 ### 厂商官方发布（`source=vendor`，一手信息）
 
-| 源 | 抓取方式 | 条目 |
-|---|---|---|
-| OpenAI | RSS | 1050 |
-| Google DeepMind | RSS | 100 |
-| Hugging Face | RSS | 100 |
-| NVIDIA 开发者 | RSS | 100 |
-| Cursor 更新日志 | RSS | 50 |
-| 通义千问 Qwen | RSS | 44 |
-| 智谱 GLM | HTML（开放平台更新日志） | 24 |
-| AWS 机器学习 | RSS | 20 |
-| Google AI | RSS | 20 |
-| NVIDIA | RSS | 18 |
-| DeepSeek | HTML（api-docs 侧栏） | 15 |
-| Anthropic | HTML（/news 列表页） | 12 |
-| GitHub AI & ML | RSS | 10 |
-| GitHub 工程博客 | RSS | 10 |
-| 字节 Seed | HTML + 标题 slug 推导 | 8 |
-| Kimi（月之暗面） | HTML | 8 |
+| 源 | 抓取方式 | 条目 | 最近入库 |
+|---|---|---|---|
+| OpenAI | RSS | 1094 | 08-17 |
+| NVIDIA 开发者 | RSS | 122 | 08-17 |
+| Hugging Face | RSS | 118 | 08-17 |
+| Google DeepMind | RSS | 107 | 08-13 |
+| AWS 机器学习 | RSS | 73 | 08-17 |
+| Cursor 更新日志 | RSS | 55 | 08-17 |
+| NVIDIA | RSS | 37 | 08-17 |
+| Google AI | RSS | 29 | 08-17 |
+| Kimi（月之暗面） | HTML | 28 | 08-17 |
+| 智谱 GLM | HTML（开放平台更新日志） | 24 | 07-25 |
+| GitHub AI & ML | RSS | 19 | 08-17 |
+| Anthropic | HTML（/news 列表页） | 18 | 08-14 |
+| DeepSeek | HTML（api-docs 侧栏） | 16 | 08-13 |
+| GitHub 工程博客 | RSS | 14 | 08-10 |
+| 字节 Seed | HTML + 标题 slug 推导 | 10 | 08-05 |
+
+厂商发布是低频源，「最近入库」隔几天很正常——它反映的是对方发不发，不是我们抓不抓。
+真正的采集健康看 `/api/v1/health`。
 
 ### 平台热榜（`source=hotlist`）
 
 | 源 | 抓取方式 | 条目 |
 |---|---|---|
-| 今日头条 | JSON | 382 |
-| AIHOT | JSON | 189 |
-| B站排行榜 | JSON | 154 |
-| Hacker News | JSON（Algolia 官方 API） | 118 |
-| LINUX DO | JSON（**需 TLS 指纹伪装**） | 113 |
-| Product Hunt | RSS | 92 |
-| IT之家 | RSS | 64 |
-| 掘金 | JSON | 62 |
-| 36氪 | RSS | 60 |
-| 远景论坛 | RSS | 35 |
-| 少数派 | JSON | 31 |
-| V2EX | JSON | 29 |
-| GitHub Trending | HTML | 25 |
-| Solidot | RSS | 24 |
+| 今日头条 | JSON | 5227 |
+| AIHOT | JSON | 4894 |
+| IT之家 | RSS | 3937 |
+| Hacker News | JSON（Algolia 官方 API） | 1607 |
+| LINUX DO | JSON（**需 TLS 指纹伪装**） | 1446 |
+| B站排行榜 | JSON | 1118 |
+| 掘金 | JSON | 639 |
+| Product Hunt | RSS | 468 |
+| 远景论坛 | RSS | 387 |
+| V2EX | JSON | 371 |
+| Solidot | RSS | 215 |
+| GitHub Trending | HTML | 164 |
+| 少数派 | JSON | 64 |
 
 ### 媒体（`source=rss`）
 
 | 源 | 条目 |
 |---|---|
-| 爱范儿 | 20 |
-| InfoQ 中国 | 20 |
-| Latent Space | 20 |
-| TechCrunch AI | 20 |
-| 量子位官网 | 10 |
+| InfoQ 中国 | 291 |
+| 爱范儿 | 192 |
+| TechCrunch AI | 183 |
+| 量子位官网 | 166 |
+| Latent Space | 42 |
 
 ### 微信公众号（`source=wechat`）
 
-**23 个号，其中 21 个是国产大模型厂商的官方号。** 这条线的价值在于：
+**24 个号：20 个国产大模型厂商官方号 + 3 个大厂技术号 + 1 个媒体。** 这条线的价值在于：
 国产厂商的官网普遍是 SPA 且几乎全都没有 RSS（实测 MiniMax、百川、
 阶跃星辰、零一万物、面壁、腾讯混元、百度、讯飞无一例外），
 **一手发布实际走的就是公众号**。
 
-智谱清言 · 智谱 · Kimi 开放平台 · 月之暗面 Kimi · 千问大模型 · 通义实验室 ·
-零一万物 01AI · MiniMax 稀宇科技 · MiniMax 开放平台 · 百川智能 · 阶跃 StepFun ·
-面壁智能 · 字节跳动 Seed · 火山引擎 · 腾讯混元 · 百度文心 · 讯飞开放平台 ·
-DeepSeek · 昆仑万维 · 智源研究院 · 商汤科技 · 量子位 · 机器之心
+智谱清言 · 智谱 · GLM大模型 · Kimi开放平台 · 月之暗面 Kimi · 千问大模型 ·
+千问AI平台 · 通义实验室 · MiniMax 稀宇科技 · MiniMax开放平台 · 百川智能 ·
+字节跳动Seed · 火山引擎 · 豆包 · 腾讯混元 · 百度文心 · 百灵大模型 ·
+讯飞开放平台 · DeepSeek · 智源研究院 · 京东技术 · 京东云开发者 · 小米技术 · 机器之心
+
+> **当前状态：这条线被微信读书的人机验证挡着，最近一次成功入库是 2026-08-08。**
+> 自检（`python -m sourcepilot.channels.wechat.weread_check`）现在停在 `CAPTCHA`：
+> 书架接口与阅读器页通行证都正常，24 个号也都能定位到 bookId，卡在真正拉文章那一步。
+> 根因是出口 IP 被腾讯风控标记（排查过程见 [docs/progress.md](docs/progress.md)），
+> 不是凭据或代码问题。**其余 34 个源不受影响**——公众号 channel 是隔离的，
+> 这正是「一个源崩了不许拖垮全局」那条铁律要的效果。
 
 账号全部写死 `fakeid` 而不是按名字搜，这是**正确性问题不是优化**——
 实测搜「智谱AI」命中的是个 2022 年就停更的同名号，搜「Kimi」命中的是
-2018 年一个讲电影票的无关号。顺带每轮请求数减半（23 次而不是 46 次），
-而搜索正是公众平台上最容易触发风控的动作。
+2018 年一个讲电影票的无关号。而搜索正是公众平台上最容易触发风控的动作（每轮 24 次而不是 48 次）。
 
 查号用 `python -m sourcepilot.channels.wechat.lookup <名字或微信号>`，
 它会把每个候选的**最近更新日期**一并列出来——挑号要看活跃度，不能看名字像不像。
@@ -168,10 +175,17 @@ DeepSeek · 昆仑万维 · 智源研究院 · 商汤科技 · 量子位 · 机�
 
 - **微博** — 不带 cookie 直接 403，等 Canary 能发现 cookie 失效后再启用
 - **酷安** — 需要设备参数算 `X-App-Token`，签名属重逻辑范畴
+- **36氪** — 2026-08-07 整站挂到了火山引擎的安全检测后面。`/feed` 回的是一张挑战页
+  （HTTP 200、17KB、零个 `<item>`），curl_cffi 的五种指纹全部穿不过去——那道墙要执行 JS。
+  停用理由与试过的路子写在 [36kr.yaml](config/sources/36kr.yaml) 文件头
 - **11 个媒体/研究/社区 RSS** — BAIR、微软研究院、MIT 科技评论、Simon Willison、
   Smol AI、The Decoder、The Verge、VentureBeat、TLDR AI、两个 Reddit 板块。
   源本身实测可用且字段完整，关掉是为了**与 AIRADAR 的实际启用清单对齐**——
   它库里这些是 `is_active=false`。要恢复只需改一行 `enabled`
+- **通义千问 Qwen** — 2026-08-18 停用。`qwenlm.github.io` 还能抓 44 条、格式完整，
+  但最新一篇是 2025-09-22：Qwen 的博客搬到了 qwen.ai（SPA，`/rss.xml` 返回外壳 HTML）。
+  **抓得到旧内容比抓不到更危险**——采集成功、Canary 正常、下游却会以为「Qwen 最近没发布」。
+  复开要找 qwen.ai 的列表 API，属重逻辑而非改配置
 - **搜狗微信** — 实测数据陈旧（量子位只出 2 条且含 2019 年的、机器之心 9 条全是 2017 年），
   且约 20 次请求就触发验证码。**一个静默返回旧文的兜底比没有兜底更危险**
 
@@ -402,7 +416,7 @@ extract:
 
 ### Canary 自检
 
-24 个源里任何一个改版、被封或返回空，如果只在日志里留一行 warning，
+35 个源里任何一个改版、被封或返回空，如果只在日志里留一行 warning，
 等发现时可能已经断了好几天。Canary 做三级判定：
 
 | 判定 | 触发条件 |
@@ -680,7 +694,15 @@ vs「上次拉取之后你们又收到了什么」。混用会让首次采集把
 - **`q=` 是子串匹配不是全文检索**。SQLite FTS5 的两种分词器对中文都不好使
   （`unicode61` 把整串中文当一个词，`trigram` 要求查询至少 3 字符），
   子串匹配对中文天然正确，代价是全表扫描——当前规模下是亚毫秒级
-- **代理轮换未做**。24 源里只有 X 有 IP 层风险且请求量低，等抓取量上来再说
+- **代理轮换未做**。35 源里只有 X 有 IP 层风险且请求量低，等抓取量上来再说
+- **`read_article` 在 fake-ip 代理下要放行占位地址**。Clash 这类代理在 fake-ip 模式
+  下不做真实 DNS，把每个域名映射到 `198.18.0.0/16`（IPv6 侧 `fdfe:dcba:9876::/48`）里的
+  占位地址，而 Python 把那个段算作私网——照原样判定的结果是**每一个公网 URL 都被拒**，
+  工具静默失效。所以这些段按「域名的占位地址」处理，`SOURCEPILOT_FAKE_IP_CIDRS` 可改可关。
+  代价说清楚：用代理就意味着「这个域名去哪」由代理决定；字面内网 IP 与内网域名照旧拦住
+- **公众号线当前被人机验证挡着**（最近成功入库 2026-08-08）。根因是出口 IP 被腾讯风控
+  标记，不是凭据或代码问题；weread 这条路本身还有三个固有局限：收录滞后（实测遇到过
+  半个多月）、通常比发布晚几小时、有反爬（撞了就调大 `min_interval`，别重试）
 
 ## 开发
 
@@ -688,8 +710,9 @@ vs「上次拉取之后你们又收到了什么」。混用会让首次采集把
 .venv/bin/python -m pytest && .venv/bin/ruff check src tests
 ```
 
-测试全部离线，不依赖网络。315 项测试中，契约不变量测试（`tests/test_contracts.py`）
-是最重要的一组——它们就是契约本身。
+536 项测试，**全部离线**——连 DNS 都是打桩的（SSRF 那组用例若真去解析域名，
+在开着代理的机器上会集体误判，见 `tests/test_article.py` 的 `stub_dns`）。
+其中契约不变量测试（`tests/test_contracts.py`）是最重要的一组——它们就是契约本身。
 
 进度、待办与已知问题见 [docs/progress.md](docs/progress.md)，那是进度的唯一真相源。
 
@@ -700,7 +723,15 @@ vs「上次拉取之后你们又收到了什么」。混用会让首次采集把
 
 ### 配置凭据
 
-X 与公众号需要自行配置凭据，模板见 `config/x_accounts.example.yaml`。
+35 个源里 33 个匿名可抓，**不配任何凭据也能跑起来**。要 X 与公众号才需要：
+
+| 模板 | 复制成 | 给谁用 |
+|---|---|---|
+| `config/x_accounts.example.yaml` | `config/x_accounts.yaml` | `search_x` / `get_x_timeline`（搜索必须登录态） |
+| `config/weread_credentials.example.yaml` | `config/weread_credentials.yaml` | 公众号采集的**主力路线**（微信读书） |
+| `config/wechat_credentials.example.yaml` | `config/wechat_credentials.yaml` | 公众平台 mp 后端（**列表接口当前不可用**，只剩查 fakeid 能用） |
+
+每个模板里都写了怎么取、哪些字段必须有、以及取错时会看到什么错误码。
 真实凭据文件已在 `.gitignore` 里，代码中也不会打印明文（`__repr__` 做了屏蔽）。
 
 **建议使用专用小号**——这两条线抓的都是内部接口，有封号风险。
@@ -714,6 +745,10 @@ X 与公众号需要自行配置凭据，模板见 `config/x_accounts.example.ya
 - `read_article` 是唯一按调用方给的地址出网的工具，因此有强制的地址校验：
   只接受公网 http(s)、端口限于 80/443/8080/8443、解析出的 IP 不能是私网或
   云厂商元数据地址，且跟随重定向后**重新校验一次**
+- 上面那道校验有一个**明确的例外**：代理 fake-ip 段里的占位地址（见已知边界）。
+  例外只给域名——字面量不经 DNS，`http://198.18.0.111/` 照旧被拒；内网域名走真实
+  解析拿到私网地址，也照旧被拒（DNS rebinding 那一路）。用例钉在
+  `tests/test_article.py::TestFakeIpRange`
 
 ## 致谢
 

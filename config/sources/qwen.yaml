@@ -1,8 +1,21 @@
+# **已禁用（2026-08-18）：这个源还能抓，但抓回来的是一年前的内容。**
+#
+# 实测 2026-08-18：`qwenlm.github.io/blog/index.xml` 仍返回 44 条、格式完整，
+# 但最新一篇是 2025-09-22（Qwen3Guard）——Qwen 的博客早已搬到 qwen.ai，
+# 旧站停更但没下线。**这比 404 更危险**：抓取成功、Canary 一切正常、
+# 库里躺着 44 条陈年公告，看不出任何异常，而下游会以为「Qwen 最近没发布」。
+#
+# 新站抓不动（2026-08-18 实测）：qwen.ai 是 SPA，`/rss.xml` 返回的是同一份
+# 外壳 HTML，静态提取拿不到条目。要恢复得找它的前端 API（列表数据接口），
+# 属于「重逻辑」而不是改配置。
+#
+# 复开条件：找到 qwen.ai 的列表 API 并把 request/extract 换过去，
+# 确认抓回的最新条目日期在近期。见 docs/progress.md 的 T11。
 name: qwen
 display_name: 通义千问 Qwen 博客
 type: vendor
 platform: qwen
-enabled: true
+enabled: false
 min_interval: 3600  # 厂商博客
 lang: en
 categories: [model]

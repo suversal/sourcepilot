@@ -314,7 +314,9 @@ class TestRouter:
         monkeypatch.setattr(GraphQLBackend, "available", lambda self: True)
         monkeypatch.setattr(GraphQLBackend, "user_id", lambda self, h: "u1")
         monkeypatch.setattr(
-            GraphQLBackend, "timeline", lambda self, uid, n, c=None: (["来自 graphql"], ["记录"], None)
+            GraphQLBackend,
+            "timeline",
+            lambda self, uid, n, c=None: (["来自 graphql"], ["记录"], None),
         )
         monkeypatch.setattr(
             NitterBackend, "fetch_timeline",
