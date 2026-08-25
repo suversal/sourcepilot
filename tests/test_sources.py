@@ -179,6 +179,10 @@ class TestShippedConfigs:
         platforms = [c.platform for c in load_sources(SOURCES_DIR).values()]
         assert len(platforms) == len(set(platforms))
 
+    def test_x_topic_names_are_the_persisted_chinese_identifiers(self):
+        x = load_sources(SOURCES_DIR)["x"]
+        assert [topic.name for topic in x.topics] == ["AI 热点", "U卡推荐", "eSIM推荐"]
+
 
 class TestCategorizer:
     """分类只做确定性打标，且宁可不标也不错标。"""

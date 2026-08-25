@@ -578,7 +578,7 @@ reply > original），精确判断仍用那几个布尔字段。
 
 ```yaml
 topics:
-  - name: u-card                                 # 话题标识
+  - name: U卡推荐                                # 话题标识（支持中文）
     query: '"U卡" min_faves:5'                   # X 搜索语法原样透传
     limit: 20
     min_likes: 10                                # 采集侧确定性阈值兜底
@@ -602,6 +602,8 @@ topics:
 - `GET /api/v1/x/tweets` 新增 `topic` 过滤参数（单个话题标识）。
 - 一条推文可同时命中多个话题、也可同时在订阅账号时间线里——`topics`
   是**合并**语义，重复采集不清标签。
+- `topics[].name` 支持中文，但它是持久化标识而非纯展示文案；改名时必须同步
+  迁移 `x_tweets.topics` 的历史标签，否则新旧名称会分裂成两个话题。
 
 话题搜索走登录账号池（与 `search_x` 同一条通道），配额与封号风险相同，
 所以话题应**少而精**；每话题每轮一次搜索，跟随 x 源的 `min_interval`。

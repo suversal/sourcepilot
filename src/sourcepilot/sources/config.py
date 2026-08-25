@@ -225,7 +225,9 @@ class ChannelTopic(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="话题标识（进 x_tweets.topics 与 ?topic= 过滤），建议 kebab-case")
+    name: str = Field(
+        description="话题标识（进 x_tweets.topics 与 ?topic= 过滤），支持中文，改名需迁移历史标签"
+    )
     query: str = Field(description="X 搜索语法原样透传，如 '\"GPT-5.6\" min_faves:50 lang:en'")
     limit: int = Field(default=20, ge=1, le=50, description="每轮每话题最多取多少条")
     min_likes: int = Field(
