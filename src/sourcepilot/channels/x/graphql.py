@@ -32,11 +32,11 @@ from typing import Any, Protocol
 import httpx
 
 from ...contracts import (
-    AuthExpired,
     Item,
     Media,
     MediaType,
     Source,
+    SourcePilotError,
     SourceType,
     TimeBasis,
     UpstreamDown,
@@ -60,7 +60,7 @@ log = logging.getLogger("sourcepilot.channels.x")
 #: 也靠这个上限兜底（防止某些静默失效不表现为 404）。
 SIGNER_TTL = 30 * 60
 #: 解析失败后的重试间隔。解析一次要拉好几 MB，失败也不是一秒内能好的。
-SIGNER_RETRY_AFTER = 5 * 60
+SIGNER_RETRY_AFTER = 30 * 60
 
 
 class TransactionSigner(Protocol):
@@ -248,6 +248,7 @@ class GraphQLBackend:
         self._signer_is_managed = transaction_signer is None
         self._signer_loaded_at = 0.0
         self._signer_failed_at = 0.0
+        self._signer_error: SourcePilotError | None = None
 
     def _ensure_signer(self, account: Account, *, force: bool = False):
         """按需解析签名密钥，**并在过期或被拒后重取**。
@@ -275,11 +276,22 @@ class GraphQLBackend:
 
             self.signer = XTransactionSigner.load(account.cookie, account.user_agent)
             self._signer_loaded_at = now
+            self._signer_error = None
             log.info("X 签名密钥已%s", "重新解析" if force else "解析")
-        except Exception as exc:
+        except SourcePilotError as exc:
             log.warning("X 签名密钥解析失败：%s", exc)
             self.signer = None
             self._signer_failed_at = now
+            self._signer_error = exc
+        except Exception as exc:
+            # 未知解析异常是上游页面/解析器故障，不等于账号失效。保留成结构化错误，
+            # 让搜索正常降级缓存，也避免把整个 GraphQL 后端误冷却 6 小时。
+            log.warning("X 签名密钥解析失败：%s", exc)
+            self.signer = None
+            self._signer_failed_at = now
+            self._signer_error = UpstreamDown(
+                f"X 签名密钥解析异常：{type(exc).__name__}"
+            )
         return self.signer
 
     def refresh_signer(self, account: Account | None = None):
@@ -309,10 +321,9 @@ class GraphQLBackend:
             raise UpstreamDown(f"没有配置 {operation} 的 operation id")
         if operation in SIGNED_OPERATIONS and self._ensure_signer(account) is None:
             # 与其发出去等一个语焉不详的 404，不如直接说清楚缺什么。
-            raise AuthExpired(
-                f"{operation} 需要 x-client-transaction-id 签名，但密钥解析失败。"
-                f"该签名是一次性的，不能截获复用——见 channels/x/config.py 的实测记录"
-            )
+            if self._signer_error is not None:
+                raise self._signer_error
+            raise UpstreamDown(f"{operation} 需要签名，但签名器暂不可用")
 
         path = f"/{query_id}/{operation}"
         params = {

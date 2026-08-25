@@ -43,13 +43,32 @@ nitter_instances: []
 # 定时采集这些账号的时间线进库。库里有东西，search_x 现查失败时的降级才有意义。
 per_account_limit: 20
 accounts:
+  # OpenAI / Anthropic
   - OpenAI
   - AnthropicAI
   - claudeai
-  - thsottiaux
+  - ClaudeDevs
+
+  # Google / xAI / Meta / Microsoft
+  - GoogleAI
+  - GoogleDeepMind
+  - xai
   - grok
-  - xiaohu
-  - dotey
+  - AIatMeta
+  - MicrosoftAI
+
+  # 开源与基础设施
+  - MistralAI
+  - huggingface
+  - nvidia
+
+  # 国内主流模型
+  - deepseek_ai
+  - Alibaba_Qwen
+  - Kimi_Moonshot
+  - Zai_org
+  - TencentHunyuan
+  - ManusAI
 
 # 话题订阅（契约 §5.5）：事件追踪，与账号订阅平级的第二条腿。
 # 账号盖「官方说了什么」，话题盖「这个事件下大家在说什么」。
@@ -58,9 +77,17 @@ accounts:
 # query 用 X 搜索语法，min_faves 在上游过滤；min_likes 是采集侧兜底阈值。
 topics:
   # sort 默认 top（X 的热门排序）。中文圈子小，min_faves 放低，靠 Top 排序出热度。
+  - name: ai-hot
+    query: '(OpenAI OR ChatGPT OR GPT OR Anthropic OR Claude OR Gemini OR DeepMind OR xAI OR Grok OR "Meta AI" OR Llama OR Microsoft OR Copilot OR Mistral OR NVIDIA OR HuggingFace OR DeepSeek OR Qwen OR 通义千问 OR Kimi OR 月之暗面 OR GLM OR 智谱 OR 豆包 OR MiniMax OR Manus OR ERNIE OR 文心 OR Hunyuan OR 混元) (发布 OR 推出 OR 上线 OR 更新 OR 开源 OR release OR launch OR announce OR update OR "open source") min_faves:5 -filter:replies'
+    sort: latest
+    limit: 20
+
   - name: u-card
-    query: '"U卡" min_faves:5'
-    limit: 20
+    query: '"U卡" (推荐 OR 套餐 OR 资费 OR 测评) min_faves:5 -filter:replies'
+    sort: top
+    limit: 10
+
   - name: esim
-    query: 'eSIM min_faves:10'
-    limit: 20
+    query: 'eSIM (推荐 OR 套餐 OR 测评 OR travel OR roaming) min_faves:10 -filter:replies'
+    sort: top
+    limit: 10

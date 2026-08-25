@@ -7,17 +7,18 @@
 > 契约决议在 [contract.md](contract.md) §0；每次变更的具体理由在 git commit message 里。
 > 本文件只回答三个问题：**做到哪了 · 怎么验证的 · 还欠什么**。
 
-最后更新：2026-08-18
+最后更新：2026-08-25
 
 ---
 
 ## 一句话状态
 
 契约 v1.9.0。**6 步落地顺序全部走完**，可靠性层剩代理轮换（T8）。
-35 个启用源 / 11 个 REST 端点 / 四个出口（REST · MCP · SKILL.md · RSS）/ 库里 25100 条 / 536 项测试。
+35 个启用源 / 11 个 REST 端点 / 四个出口（REST · MCP · SKILL.md · RSS）/
+持久库 33488 条 / 567 项测试。
 
-**当前唯一的红灯：公众号线被微信读书的人机验证挡着，08-08 起无新增**（根因是出口 IP 被
-腾讯风控标记，见已知问题里的「出口 IP 被腾讯风控标记」）。其余 34 个源正常，最近一轮采集 08-18。
+**当前红灯有两条**：公众号线被微信读书的人机验证挡着，08-08 起无新增；`pcbeta`
+连续返回无法解析的 RSS。其余源继续按各自周期采集，X 实时话题已于 08-25 恢复。
 
 ---
 
@@ -99,6 +100,7 @@ P2 = 体验问题**。
 （重启不重推）；推送失败不更新状态、下轮重试（先记后发会永久吞掉告警）；best-effort，
 绝不阻塞采集。真实通道已验证，生产库 dry-run 正确推出 bilibili + wechat 两条 |
 | T13 | P1 | weread 撞验证码后的降级行为 | 现在撞了 CAPTCHA 就整条线停在那，库里的旧文照常提供（这部分是对的），但**没有任何对外信号**说「这个源的数据不新了」。契约有 `meta.stale`，`/wechat/feed` 该在后端处于验证码冷却期时把它置上，让下游知道手里是旧数据 |
+| ~~T14~~ | ✅ 已完成 | ~~X 实时话题签名恢复与冷却隔离~~ | 2026-08-25 X 的 responsive-web chunk hash 从 7 位切到 16 位，旧正则找不到 `ondemand.s`，却误报 `AUTH_EXPIRED` 并把整个 GraphQL 后端冷却 6 小时。现已兼容 7/16 位 hash；页面结构故障改报 `UPSTREAM_DOWN`；搜索冷却键拆为 `x:graphql:SearchTimeline`，不再拖累无需签名的 `UserTweets`。真实 `SearchTimeline` 验证 `HTTP 200 / mode=live / stale=false / 20 条`，567 项测试通过 |
 | T9 | P2 | `/items` 按公众号过滤（或 `/wechat/feed` 加 `since`） | AIRADAR Phase 1 接入实测发现（2026-08-04）：`/items` 的 `platform` 白名单只认信源配置名（`wechat` 整体算一个），不认具体公众号名；按号过滤只能走 `/wechat/feed`，而它没有 `since` 参数（契约 §4 如此）。下游已用 `/wechat/feed` + 客户端水位过滤落地，本机毫秒级查询下没有实际代价，所以只是 P2。真做时二选一：platform 白名单纳入公众号名，或 `/wechat/feed` 加 `since`（加可选参数属 minor） |
 
 ---
@@ -129,7 +131,7 @@ P2 = 体验问题**。
 | ✅ **搜索已完整跑通** | 配上 cookie 后，`search_x` 现场搜 X 返回 10 条实时结果、6.1s、带分页游标；结果自动入库，`live=false` 读缓存 0ms | 落地顺序第 3 步完成 |
 | ✅ **签名已实现并端到端验证** | 用自己实现的生成器产出签名，打真实 `SearchTimeline` 拿到 **200 / 133KB / 20 条推文**；同一端点不带签名是 404。anim_key 与独立写的 JS 实现在两组真实输入上逐字符一致 | 见 `channels/x/signature.py`。剩下的只差把 `auth_token` 填进 `config/x_accounts.yaml` |
 | verification key 每次请求都变 | 同一页面连续两次抓取拿到完全不同的 48 字节 | 取 key、算 anim_key、发请求必须在一次会话里连贯完成，不能跨请求缓存 key |
-| 老版 webpack 构建要重建 chunk 地址 | 登录态页面用的是 responsive-web 老构建，签名脚本 `ondemand.s` 不在 HTML 里，要从页面内两张映射表（683 条哈希 + 616 条名称）拼出地址 | 已实现重建分支。**踩过的坑**：chunk 正则若把 responsive-web 也算进去，会误判成新版而跳过重建，整条路就断了 |
+| responsive-web 构建要重建 chunk 地址 | 登录态页面的签名脚本 `ondemand.s` 不在 HTML 里，要从页面内哈希表与名称表拼地址。2026-08-25 hash 从 7 位切到 16 位，旧解析器因此从 02:52 起每 6 小时失败一次 | 已同时支持 7/16 位 hash；16 位页面实测识别 1023 个 chunk，构造出的 `ondemand.s` 返回 200 并解析出 4 个索引。搜索结构故障不再误伤时间线 |
 | **搜索强制签名，且签名一次性** | 在真实登录态浏览器里对照验证（2026-07-26）：`UserByScreenName`/`UserTweets`/`UserMedia` 不带签名一律 200；`SearchTimeline` 不带签名 404，**带浏览器刚生成的签名重放依然 404**。最后一条说明签名带时间戳或 nonce，截获不能复用 | 时间线立刻可用；搜索绕不开复刻 twscrape 的 xclid 算法。代码里 `SIGNED_OPERATIONS` 记着这个分化，缺签名器时直接报清楚原因而不是发出去等 404 |
 | operation id 与 features 曾经全部过期 | 我凭记忆写的三个 operation id 实测全错，features 也差十几项 | 已用浏览器抓的真实请求校正。这次改动全部集中在 config.py，逻辑一行没动——印证了「常量抽文件」的价值 |
 | B站会用 HTTP 200 + code=-352 限流 | 实测确认：`HTTP 200 / code=-352 / message="-352" / data=null`。之前这会被报成「多半是对方改版了」 | 已在 bilibili.yaml 声明 `status` 规则，现在正确报 `RATE_LIMITED`，冷却状态机会退避 |
@@ -144,7 +146,7 @@ P2 = 体验问题**。
 | weread 的固有局限（平台侧，别当 bug 修） | **收录滞后**：部分号在微信读书侧收录慢，实测遇到过滞后半个多月的；**不实时**：通常比发布晚几小时；**有反爬**：参考实现作者一天 30 多次快速请求就白屏几小时；**fakeid 是必需的**（微信读书网页端搜不到公众号名，实测多种参数组合全返回图书，没法按名字兜底） | 撞风控就把 `min_interval` 与 `account_interval` 一起往上调，别指望重试。实测一轮 23 个号 89 秒、230 条，零失败 |
 | ~~三条替代路线全部探过，当前无自持方案~~（微信读书那条实为可用，见上） | **搜狗**：账号索引已死（`type=1` 回「暂无相关的官方认证订阅号」）；文章搜索还在但是按相关性排的关键词搜索——搜「量子位」9 条里 8 条是 2019–2022 老文，还混进「量子位=qubit」的量子计算文章，**移动入口结果不带发布者字段**，做不了「精确发布者过滤」；`usip`/`tsn`/`sortType` 一律返回空页。**wewe-rss**：自己不实现微信读书协议，转发给作者托管的 `weread.111965.xyz`（无 token 回 401），不能当参考实现。**Wechat2RSS**：现成可用（¥150/年私有部署），但用户协议禁止商用和内容分发。**profile_ext/getmsg**：需 `__biz`/`uin`/`key` 这套客户端短期凭据，与后台 token+cookie 不是同一模型，key 二十分钟级过期 | **注意别拿 `weread.qq.com/web/search/global` 验证微信读书能不能用**——它只搜图书，公众号走的是 `/web/mp/*` 那组需登录态的接口，是两回事。我第一次就是这么误判成「微信读书也断了」的。**qwen 源已失效待修**（qwenlm.github.io 停在 2025-09，新站 qwen.ai 是 SPA 抓不了），见 T11 |
 | ✅ **AIRADAR 已接入公众号信源（下游 Phase 1 落地）** | 2026-08-04：AIRADAR 侧新增 `SourcePilotCrawler`，23 个公众号各建一个 `type=sourcepilot` 源，走 `/wechat/feed?account=` 拉取 + `/article` 补全文（htmlmd 提取实测量子位 27 篇 20 篇全文）；完整管线验证 27 抓取/18 入选/19 落库。方案与实施记录在 `HotAI/docs/sourcepilot-integration-plan.md` §8 | 接入中发现的契约缺口记 T9。SP 侧本次零改动 |
-| ✅ **X 话题订阅上线（契约 1.9.0，§5.5）** | 2026-08-08：`x.yaml` 新增 `topics` 节做事件追踪——账号订阅盖「官方说了什么」，话题订阅盖「事件下大家在说什么」。定时采集逐话题跑搜索（走登录账号池），结果标 `origin=topic` 进信息流（升级链 collected > topic > searched）；`x_tweets` 加 `topics` 列（合并语义），`/x/tweets` 加 `topic` 过滤。噪音靠三道确定性闸门：**话题搜索默认走 X 的 Top 热门排序**（`sort: top`，实测 Latest 模式抓回的全是流水账，Top 一轮就是 OKX U卡 645 赞、giffgaff 1782 赞这类真热帖；`search_x` 现查保持 Latest 不动）+ query 里的 `min_faves:` + 采集侧 `min_likes` 兜底。当前订阅话题：`u-card`、`esim`（首批试的 gpt-5.6 / claude-fable-5 已于当日移除并清数据——AI 事件账号订阅已覆盖，话题位留给账号盖不住的领域）。AIRADAR 已同步接入（逐 topic 拉取 + 话题筛选 UI + 翻译） | 话题要**少而精**：每话题每轮一次搜索，配额与封号风险同 `search_x`。AR 侧话题清单镜像在 `SOURCEPILOT_X_TOPICS`，改 topics 时两边同步（同 handle 的约定，账号清单同理已扩至 7 个） |
+| ✅ **X 话题订阅上线（契约 1.9.0，§5.5）** | 2026-08-08：`x.yaml` 新增 `topics` 节做事件追踪——账号订阅盖「官方说了什么」，话题订阅盖「事件下大家在说什么」。定时采集逐话题跑搜索（走登录账号池），结果标 `origin=topic` 进信息流（升级链 collected > topic > searched）；`x_tweets` 加 `topics` 列（合并语义），`/x/tweets` 加 `topic` 过滤。噪音靠三道确定性闸门：话题可按目标选 X 的 Top 热门排序或 Latest 最新排序 + query 里的 `min_faves:` + 采集侧 `min_likes` 兜底。当前订阅话题：`ai-hot`（Latest）、`u-card`（Top）、`esim`（Top）；账号订阅为 19 个国内外官方账号。2026-08-25 实测一轮 19 个账号共 38 次 GraphQL 全部 200，`UserTweets` 的 15 分钟配额 50 次、使用后剩 31，未触发 429；`ai-hot` 长查询返回 live 20 条。AIRADAR 已接入逐 topic 拉取与话题筛选，但其镜像清单需随本次配置同步。 | 话题要**少而精**：每话题每轮一次搜索，配额与封号风险同 `search_x`。AR 侧话题清单镜像在 `SOURCEPILOT_X_TOPICS`，账号清单镜像在 `x_tweets_sync.DEFAULT_X_HANDLES` 或环境变量；本次新增清单尚待 AIRADAR 侧同步。 |
 | ✅ **AIRADAR 已接入 X 推文（下游 Phase 4 落地）** | 2026-08-08：AIRADAR 侧新增 `x_tweets` 镜像表 + 同步服务，逐订阅 handle 拉 `/api/v1/x/tweets?handle=`，首轮 81 条入库、`/x` 页按 `content_kind` 分流渲染跑通。**接入中验证了契约 §5.4 的一个后果**：`/x/tweets` 不分 collected/searched，别人现查捞回的杂音也在里面（164 条里只有 81 条属订阅账号），消费方必须按 handle 自守内容边界——这是契约设计的预期行为，不是缺口。实施记录在 `HotAI/docs/sourcepilot-integration-plan.md` §8.5 | SP 侧本次零改动。AIRADAR 的订阅 handle 列表镜像自 `config/sources/x.yaml` 的 accounts——**改这份订阅时记得同步改 AIRADAR 侧**（`x_tweets_sync.DEFAULT_X_HANDLES` 或其环境变量），SP 没有暴露订阅清单的端点 |
 | 无代理支持 | Clash 三级优先级（per-source > 全局 > 环境变量）未接 | 抓 X 之前必须补上 |
 | ⚠️ **出口 IP 被腾讯风控标记，公众号线中断** | 2026-08-17 排查：错误链是**出口 IP 被标记 → 验证码控制接口拒绝（「您的操作过于频繁」）→ `/web/mp/articles` 回 `-2041` → 采集停摆**。把四种可能逐个排除掉才定到 IP 层：换新账号（当天新注册的收集专用号）同样被拒；**真浏览器**（Playwright + 真人扫码登录、完整指纹）同样被拒；`-2014` 是频率限制、`-2041` 是验证失败，两者在同一 IP 下交替出现。共同点是**只要从这个出口出去就被拒**，与账号质量、指纹、自动化痕迹都无关。IP 是日常使用与采集共用的那一条（上海电信家宽），当天一小时内跑了自检 + 完整采集轮 + 页面/封面对照 + 三个浏览器探针，把它烤热了。2026-08-18 复测仍是 `CAPTCHA`（书架接口与阅读器页通行证都正常，24 个号都能定位 bookId，卡在真正拉文章那一步）——腾讯这类冷却通常是几小时到一天，超过一天说明标记还没解 | 所有探测脚本已全部停掉（反复探测正是让它持续被标记的原因）。**代码侧不需要改**，这不是 bug。要恢复有三条路，按代价排：① 换出口（手机热点验证 IP 假设，或接 T8 的代理轮换）；② 等标记自然过期，期间别再探；③ 把采集账号与日常账号的出口彻底分开。**真正要补的是 T12 告警**——这次是 9 天后才发现，而 `/health` 一直答得出来 |
@@ -193,4 +195,5 @@ P2 = 体验问题**。
 | `b56a328` | 发布前整理：修 `read_article` 在 fake-ip 代理下全拒（并把 SSRF 测试的 DNS 打桩，536 项真离线）；补 `trafilatura` 硬依赖与 `mcp` 可选依赖声明；`.gitignore` 补上漏掉的 `weread_collector.yaml`（含真实 cookie）与 `.claude/`；停用失效的 `qwen` 源；补 weread / 公众平台凭据模板；README 与本文件的数字、信源清单、公众号名单全部按库里实测值刷新 |
 | `64ae651` | 采集中断告警（T12）：Canary 判定发生转换时推 Telegram，复用 AIRADAR 那个机器人。9 天没发现故障的直接对策 |
 | `9164815` | 配置落地：`settings.py` 自读项目根 `.env`（真实环境变量优先），让 IDEA / 命令行 / cron 三种起法共用一份配置——凭据不能写进 `.idea/runConfigurations/*.xml`，那些文件跟着仓库走。补 `.env.example`；启动日志报告告警是否启用；LICENSE 署名改 suversal |
-| 本次 | MCP 出口兼容 mcp 2.x：**CI 第一次跑就抓到的问题**——2.0 把低层 Server 的装饰器（`@server.list_tools()`）换成构造参数回调（`on_list_tools=`），本机装的 1.28.1 全绿、干净环境装到 2.0.0 整个出口 `AttributeError`。按能力探测分流两套 API（不读版本号），并补上 `create_server` 的测试覆盖——原先所有 MCP 测试都只覆盖协议无关的那半，构造服务器这一步没人碰。CI 的 mcp 档改成 1.x / 2.x 双 matrix，在两个真实 venv 里各跑通全套 564 项 |
+| `511fed1` | MCP 出口兼容 mcp 2.x：**CI 第一次跑就抓到的问题**——2.0 把低层 Server 的装饰器（`@server.list_tools()`）换成构造参数回调（`on_list_tools=`），本机装的 1.28.1 全绿、干净环境装到 2.0.0 整个出口 `AttributeError`。按能力探测分流两套 API（不读版本号），并补上 `create_server` 的测试覆盖——原先所有 MCP 测试都只覆盖协议无关的那半，构造服务器这一步没人碰。CI 的 mcp 档改成 1.x / 2.x 双 matrix，在两个真实 venv 里各跑通全套 564 项 |
+| 本次（待提交） | 修 X responsive-web 16 位 chunk hash；签名结构故障与账号失效分流；SearchTimeline 冷却不再拖累 UserTweets；合并 Claude 临时运行库与仓库主库并切换到持久库；订阅扩为 19 个官方账号与 `ai-hot` / `u-card` / `esim` 三个话题；账号整轮与真实话题搜索通过，567 项离线测试通过 |

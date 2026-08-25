@@ -39,7 +39,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-from ...contracts import UpstreamDown
+from ...contracts import AuthExpired, UpstreamDown
 from ...settings import DEFAULT_UA
 
 log = logging.getLogger("sourcepilot.channels.x")
@@ -56,11 +56,14 @@ LOGGED_OUT_ENTRY_RE = re.compile(r"entry-client-logged-out[-.][^/?#]*\.js")
 #: 里没有签名脚本；把它们算进来会让代码误以为「已经是新版」而跳过下面的重建分支。
 #: 这个坑我踩过：正则写宽一格，整条路就断了。
 ASSET_URL_RE = re.compile(r"https://[\w.-]+/x-web/[\w./-]+\.js")
-#: 老版 webpack 构建：页面里嵌两张映射表，chunk 地址得自己拼。
+#: responsive-web webpack 构建：页面里嵌两张映射表，chunk 地址得自己拼。
+#: X 在 2026-08-25 把 hash 从 7 位切到了 16 位；两种格式都仍可能按账号/
+#: 灰度批次返回，所以不能只追着最新长度改，也不能放宽成任意 hex（会把纯 hex
+#: 的可读 chunk 名误判成 hash）。
 CHUNK_BASE = "https://abs.twimg.com/responsive-web/client-web"
-HASH_MAP_RE = re.compile(r'(\d+):"([0-9a-f]{7})"')
+HASH_VALUE_RE = re.compile(r"(?:[0-9a-f]{7}|[0-9a-f]{16})")
+HASH_MAP_RE = re.compile(r'(\d+):"([0-9a-f]{7}|[0-9a-f]{16})"')
 NAME_MAP_RE = re.compile(r'(\d+):"([^"]+)"')
-HEX7_RE = re.compile(r"[0-9a-f]{7}")
 #: 存放动画索引的文件：老版本直接叫 ondemand.s.*.js，新版本是 chunk 里动态 import 的
 #: sign.o-*.js。`\b` 是为了别把 design.o-*.js 这种误当成它。
 INDICES_FILE_RE = re.compile(r"(?:\.{0,2}/)?[\w./-]*?\b(?:ondemand\.s|sign\.o)[\w.-]*\.js")
@@ -228,16 +231,21 @@ def _find_indices_script(
     """
     scripts = list(dict.fromkeys(ASSET_URL_RE.findall(html)))
     if not scripts:
-        # 老版 webpack 构建：没有现成的 chunk URL，从页面里的两张映射表重建。
-        #   哈希表  {chunk_id: "7位十六进制"}
-        #   名称表  {chunk_id: "可读名"}     —— 值不是 7 位十六进制的那些
+        # responsive-web webpack 构建：没有现成的签名 chunk URL，从页面里的
+        # 两张映射表重建。
+        #   哈希表  {chunk_id: "7或16位十六进制"}
+        #   名称表  {chunk_id: "可读名"}     —— 值不是受支持长度的纯十六进制
         #   地址     {base}/{名称或id}.{哈希}a.js      注意末尾那个 a
         hash_map = dict(HASH_MAP_RE.findall(html))
         if not hash_map:
             raise SignatureUnavailable("页面里既没有 chunk 链接也没有 webpack 映射表")
         name_map = {
-            cid: name for cid, name in NAME_MAP_RE.findall(html) if not HEX7_RE.fullmatch(name)
+            cid: name
+            for cid, name in NAME_MAP_RE.findall(html)
+            if not HASH_VALUE_RE.fullmatch(name)
         }
+        lengths = sorted({len(value) for value in hash_map.values()})
+        log.info("X responsive-web 构建：%d 个 chunk，hash 长度 %s", len(hash_map), lengths)
         scripts = [
             f"{CHUNK_BASE}/{name_map.get(cid, cid)}.{digest}a.js"
             for cid, digest in hash_map.items()
@@ -289,7 +297,7 @@ class XTransactionSigner:
     ) -> XTransactionSigner:
         """解析签名密钥。**必须带账号 cookie**——匿名态的 bundle 里没有签名脚本。"""
         if not cookie:
-            raise SignatureUnavailable("解析 X 签名密钥需要账号 cookie（匿名态拿不到签名脚本）")
+            raise AuthExpired("解析 X 签名密钥需要账号 cookie（匿名态拿不到签名脚本）")
 
         owns = client is None
         client = client or httpx.Client(follow_redirects=True, timeout=20.0)
@@ -298,7 +306,7 @@ class XTransactionSigner:
             html = client.get(HOME_URL, headers=headers).text
             if LOGGED_OUT_ENTRY_RE.search(html):
                 # 拿到匿名 build 说明 cookie 没生效（过期或被拒），继续解析只会失败在更深处。
-                raise SignatureUnavailable(
+                raise AuthExpired(
                     "X 返回的是匿名版页面——cookie 未生效，签名密钥无法解析"
                 )
             soup = BeautifulSoup(html, "html.parser")

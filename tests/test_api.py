@@ -155,7 +155,9 @@ class TestFeed:
         client.get("/api/v1/hotlist")
         seen, cursor = [], None
         for _ in range(5):
-            params = {"limit": 1, "window": "30d", **({"cursor": cursor} if cursor else {})}
+            # 分页行为与时间窗无关。夹具的发布时间是固定值，使用 30d 会让这条
+            # 测试随日历推进而逐渐丢数据，最终把“时间过滤正确”误报成“分页坏了”。
+            params = {"limit": 1, "window": "all", **({"cursor": cursor} if cursor else {})}
             body = client.get("/api/v1/items", params=params).json()
             seen += [i["id"] for i in body["data"]["items"]]
             cursor = body["meta"]["next_cursor"]

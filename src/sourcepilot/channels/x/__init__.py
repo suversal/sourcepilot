@@ -45,13 +45,22 @@ class XRouter:
         self.nitter = NitterBackend(nitter_instances)
         self.graphql = GraphQLBackend(impersonate=impersonate)
 
-    def _usable(self, backends):
-        return [b for b in backends if b.available() and not COOLDOWNS.blocked(f"x:{b.name}")]
+    @staticmethod
+    def _cooldown_key(backend, scope: str | None = None) -> str:
+        base = f"x:{backend.name}"
+        return f"{base}:{scope}" if scope else base
 
-    def _run(self, backends, call, what: str):
+    def _usable(self, backends, scope: str | None = None):
+        return [
+            b
+            for b in backends
+            if b.available() and not COOLDOWNS.blocked(self._cooldown_key(b, scope))
+        ]
+
+    def _run(self, backends, call, what: str, *, cooldown_scope: str | None = None):
         """顺次试各后端。失败的按「是不是该停手」决定要不要冷却。"""
         first_error: SourcePilotError | None = None
-        candidates = self._usable(backends)
+        candidates = self._usable(backends, cooldown_scope)
         if not candidates:
             names = [b.name for b in backends]
             # 用 AUTH_EXPIRED 而不是 INTERNAL：对 Agent 来说这是可操作的信息
@@ -59,15 +68,16 @@ class XRouter:
             raise AuthExpired(f"X 的{what}没有可用后端（{', '.join(names)}）")
 
         for backend in candidates:
+            cooldown_key = self._cooldown_key(backend, cooldown_scope)
             try:
                 result = call(backend)
             except SourcePilotError as exc:
                 if exc.code in BACKEND_LEVEL_FAILURES:
-                    COOLDOWNS.penalize(f"x:{backend.name}", exc.code)
+                    COOLDOWNS.penalize(cooldown_key, exc.code)
                 log.warning("X 后端 %s 处理 %s 失败：%s", backend.name, what, exc.code.value)
                 first_error = first_error or exc
                 continue
-            COOLDOWNS.clear(f"x:{backend.name}")
+            COOLDOWNS.clear(cooldown_key)
             if backend is not candidates[0]:
                 log.info("X 的 %s 由降级后端 %s 提供", what, backend.name)
             return result
@@ -88,6 +98,7 @@ class XRouter:
             [self.graphql],
             lambda b: b.search(query, limit, cursor, product),
             f"搜索 {query!r}",
+            cooldown_scope="SearchTimeline",
         )
 
     def timeline(self, handle: str, limit: int, cursor: str | None = None):

@@ -13,7 +13,14 @@ from sourcepilot.channels.x.accounts import Account, AccountPool
 from sourcepilot.channels.x.fxtwitter import FxTwitterBackend, tweet_to_item
 from sourcepilot.channels.x.graphql import GraphQLBackend, walk_timeline
 from sourcepilot.channels.x.nitter import NitterBackend
-from sourcepilot.contracts import AuthExpired, RateLimited, SourceType, TimeBasis, UpstreamDown
+from sourcepilot.contracts import (
+    AuthExpired,
+    ErrorCode,
+    RateLimited,
+    SourceType,
+    TimeBasis,
+    UpstreamDown,
+)
 
 NOW = datetime(2026, 7, 26, tzinfo=UTC)
 
@@ -358,10 +365,28 @@ class TestSignatureRequirement:
             transaction_signer=signer,
         )
 
-    def test_search_without_signer_fails_fast_with_a_clear_reason(self):
-        """与其发出去等一个语焉不详的 404，不如直接说清楚缺什么。"""
-        with pytest.raises(AuthExpired, match="x-client-transaction-id"):
+    def test_parser_failure_is_upstream_down_not_auth_expired(self, monkeypatch):
+        """页面结构变了不是账号过期，不能因此把账号或整个 GraphQL 判死。"""
+        from sourcepilot.channels.x import signature as sig
+
+        monkeypatch.setattr(
+            sig.XTransactionSigner,
+            "load",
+            staticmethod(lambda *a, **kw: (_ for _ in ()).throw(sig.SignatureUnavailable("改版"))),
+        )
+        with pytest.raises(UpstreamDown, match="改版"):
             self._backend().search("test", 5)
+
+    def test_search_cooldown_does_not_block_timeline(self):
+        """搜索签名坏了只冷却 SearchTimeline；UserTweets 不需要签名，必须继续可用。"""
+        COOLDOWNS.penalize("x:graphql:SearchTimeline", ErrorCode.AUTH_EXPIRED)
+        router = XRouter()
+        router.graphql = GraphQLBackend(
+            pool=AccountPool([Account(name="a", cookie="auth_token=x; ct0=c")]),
+            transaction_signer=object(),
+        )
+        assert router._usable([router.graphql], "SearchTimeline") == []
+        assert router._usable([router.graphql]) == [router.graphql]
 
     def test_timeline_operations_do_not_require_a_signer(self, monkeypatch):
         """时间线不需要签名——实测可用，别因为搜索的限制把它一起挡了。"""
@@ -425,12 +450,20 @@ class TestTransactionSignature:
     def test_anonymous_load_is_rejected_with_a_clear_reason(self):
         """匿名态的 bundle 里没有签名脚本，早点说清楚好过失败在更深处。"""
         from sourcepilot.channels.x.signature import (
-            SignatureUnavailable,
             XTransactionSigner,
         )
 
-        with pytest.raises(SignatureUnavailable, match="cookie"):
+        with pytest.raises(AuthExpired, match="cookie"):
             XTransactionSigner.load("")
+
+    @pytest.mark.parametrize("digest", ["1a2b3c4", "b7dbcfcff298f890"])
+    def test_responsive_web_chunk_hash_lengths(self, digest):
+        """X 会按灰度批次返回 7/16 位 hash；两种都要能直达 ondemand.s。"""
+        from sourcepilot.channels.x.signature import CHUNK_BASE, _find_indices_script
+
+        html = f'59924:"{digest}";59924:"ondemand.s"'
+        expected = f"{CHUNK_BASE}/ondemand.s.{digest}a.js"
+        assert _find_indices_script(html, object()) == expected
 
     def test_cubic_curve_endpoints(self):
         from sourcepilot.channels.x.signature import CubicCurve
