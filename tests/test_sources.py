@@ -183,6 +183,29 @@ class TestShippedConfigs:
         x = load_sources(SOURCES_DIR)["x"]
         assert [topic.name for topic in x.topics] == ["AI热点", "U卡推荐", "eSIM推荐"]
 
+    def test_only_ai_topic_enables_secondary_quality_filter(self):
+        x = load_sources(SOURCES_DIR)["x"]
+        ai, u_card, esim = x.topics
+        assert ai.focus_terms and ai.context_terms
+        assert ai.focus_window_chars == 600 and ai.per_author_limit == 1
+        for topic in (u_card, esim):
+            assert topic.focus_terms == []
+            assert topic.context_terms == []
+            assert topic.per_author_limit == 0
+
+    def test_topic_distance_requires_context_terms(self):
+        from pydantic import ValidationError
+
+        from sourcepilot.sources.config import ChannelTopic
+
+        with pytest.raises(ValidationError, match="max_term_distance"):
+            ChannelTopic(
+                name="bad",
+                query="test",
+                focus_terms=["AI"],
+                max_term_distance=100,
+            )
+
 
 class TestCategorizer:
     """分类只做确定性打标，且宁可不标也不错标。"""

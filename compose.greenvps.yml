@@ -1,0 +1,23 @@
+name: sourcepilot
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sourcepilot
+    restart: unless-stopped
+    ports:
+      # GreenVPS 防火墙只开放管理与 Web 端口；SP 先保持宿主机本地可见。
+      - "127.0.0.1:8420:8420"
+    environment:
+      SOURCEPILOT_DB: /app/data/sourcepilot.db
+      # VPS 使用真实 DNS，不需要为本机 Clash fake-ip 放行保留地址段。
+      SOURCEPILOT_FAKE_IP_CIDRS: ""
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - ./config/x_accounts.yaml:/app/config/x_accounts.yaml:ro
+      - ./config/weread_credentials.yaml:/app/config/weread_credentials.yaml
+      - ./config/wechat_credentials.yaml:/app/config/wechat_credentials.yaml:ro
+    stop_grace_period: 20s

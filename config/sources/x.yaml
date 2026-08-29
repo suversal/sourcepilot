@@ -87,6 +87,52 @@ topics:
     sort: latest
     limit: 20
     min_likes: 50
+    focus_terms:
+      - OpenAI
+      - ChatGPT
+      - GPT-5
+      - Anthropic
+      - Claude AI
+      - Claude Code
+      - Claude Opus
+      - Claude Sonnet
+      - Google Gemini
+      - Google DeepMind
+      - xAI
+      - Grok
+      - Meta AI
+      - Llama AI
+      - Mistral AI
+      - NVIDIA AI
+      - Hugging Face
+      - DeepSeek
+      - Qwen
+      - 通义千问
+      - Kimi
+      - 月之暗面
+      - 智谱
+      - 豆包 AI
+      - MiniMax
+      - Manus AI
+      - 文心一言
+      - 腾讯混元
+    context_terms:
+      - 发布
+      - 推出
+      - 上线
+      - 升级
+      - 更新
+      - 开源
+      - release
+      - released
+      - launch
+      - launched
+      - announce
+      - announced
+      - open source
+    focus_window_chars: 600
+    max_term_distance: 300
+    per_author_limit: 1
 
   - name: "U卡推荐"
     query: '"U卡" (推荐 OR 套餐 OR 资费 OR 测评 OR 实测 OR 避坑 OR 开卡) min_faves:50 -filter:replies -filter:retweets'

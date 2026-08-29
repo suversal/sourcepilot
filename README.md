@@ -72,6 +72,27 @@ curl -s "http://127.0.0.1:8420/api/v1/items?source=vendor&window=30d&limit=5" | 
 交互式 API 文档在 `/docs`，可以直接点着试。
 启动后调度器会在后台按各源自己的节奏采集，无需手动触发。
 
+### GreenVPS（Docker）
+
+服务器部署使用根目录的 `compose.greenvps.yml`。它把 API 绑定到宿主机
+`127.0.0.1:8420`，不会绕过 VPS 防火墙直接暴露匿名接口；SQLite、`.env` 与三份
+登录凭据全部在运行时挂载，不进入镜像层。
+
+```bash
+docker compose -f compose.greenvps.yml up -d --build
+docker compose -f compose.greenvps.yml ps
+curl -s http://127.0.0.1:8420/api/v1/health | python3 -m json.tool
+```
+
+从本机临时访问时建立 SSH 隧道：
+
+```bash
+ssh -L 8420:127.0.0.1:8420 greenvps
+```
+
+部署前应先备份 `data/sourcepilot.db`；真实凭据继续使用已被 `.gitignore` 与
+`.dockerignore` 排除的文件，不能提交进 Git 或复制进镜像。
+
 ## 信源清单
 
 35 个启用源。当前持久库截至 2026-08-25 共 33488 条；下表分源条目数是

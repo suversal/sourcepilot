@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+
+# 运行库与登录凭据只在部署时挂载，绝不能进入镜像层。
+data
+.env
+config/x_accounts.yaml
+config/wechat_credentials.yaml
+config/weread_credentials.yaml
+config/weread_collector.yaml

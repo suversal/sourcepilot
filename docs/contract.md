@@ -578,11 +578,16 @@ reply > original），精确判断仍用那几个布尔字段。
 
 ```yaml
 topics:
-  - name: U卡推荐                                # 话题标识（支持中文）
-    query: '"U卡" min_faves:5'                   # X 搜索语法原样透传
+  - name: AI热点                                 # 话题标识（支持中文）
+    query: '(OpenAI OR Claude) (发布 OR released) min_faves:50'
     limit: 20
-    min_likes: 10                                # 采集侧确定性阈值兜底
-    sort: top                                    # 默认 top：X 的热门排序（事件追踪要热度）
+    min_likes: 50                                # 采集侧确定性阈值兜底
+    sort: latest                                 # latest：优先新鲜度
+    focus_terms: [OpenAI, Claude]                 # 可选：核心词须在主要内容区
+    context_terms: [发布, released]               # 可选：动作词须与核心词接近
+    focus_window_chars: 600                      # 推文只检查前 600 字；文章标题/摘要全查
+    max_term_distance: 300
+    per_author_limit: 1                          # 单轮同作者最多一条
 ```
 
 **与 §5.3 的关系——不是推翻，是同一原则的另一面。** §5.3 的边界原则是
@@ -591,9 +596,18 @@ topics:
 `searched`、仍不进信息流。`items.origin` 增加第三个取值 `topic`，
 升级链 `collected > topic > searched`（单向，不可降级）。
 
-**噪音控制是两道确定性闸门**（铁律：采集侧不做语义判断）：`query` 里的
+**噪音控制是确定性闸门**（铁律：采集侧不做 LLM 语义判断）：`query` 里的
 `min_faves:`/`lang:` 在上游生效；`min_likes` 是采集侧兜底，挡上游语法失效
-（X 改版）后涌进来的裸结果。语义相关性判断仍归下游。
+（X 改版）后涌进来的裸结果；`focus_terms` 要求核心词出现在 X Article 的
+标题/摘要或推文前 `focus_window_chars` 字，防正文末尾堆词；可选的
+`context_terms` + `max_term_distance` 要求两组词在同一内容段且相隔不超过指定
+字符数；`per_author_limit` 保持 X 原排序并限制单轮同作者占位。未配置这些新增
+字段的话行为与原来一致。真正的语义相关性判断仍归下游。
+
+规则收紧后，当前搜索页里未通过内容/点赞校验且曾被旧规则打过标签的条目会撤销
+该话题标签；原始推文不删除。若它只因话题搜索进入库且已无其它话题，Item 会从
+`topic` 降为 `searched`，因此退出订阅信息流；账号时间线采集的 `collected`
+条目不受影响。同作者限额只限制本轮新增，不追溯删除历史有效标签。
 
 **对消费方的可见变化**（都是 minor）：
 

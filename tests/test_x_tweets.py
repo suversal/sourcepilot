@@ -939,6 +939,35 @@ class TestTopicSubscription:
     def test_tagging_missing_tweet_is_noop(self, store):
         assert store.tag_tweet_topics(["ghost"], "gpt-5.6") == 0
 
+    def test_untag_demotes_topic_only_item_but_preserves_raw_tweet(self, store):
+        self._record(store, "1")
+        store.upsert_items([self._item("x:1")], origin="topic")
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+
+        assert store.untag_tweet_topics(["1"], "gpt-5.6") == 1
+        (tweet,) = store.query_tweets(limit=10)
+        assert tweet["topics"] == []
+        assert store.query_items(limit=10) == []
+        assert [item.id for item in store.query_items(limit=10, include_searched=True)] == ["x:1"]
+
+    def test_untag_keeps_feed_if_another_topic_remains(self, store):
+        self._record(store, "1")
+        store.upsert_items([self._item("x:1")], origin="topic")
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+        store.tag_tweet_topics(["1"], "opus-5")
+
+        store.untag_tweet_topics(["1"], "gpt-5.6")
+        assert store.query_tweets(limit=10)[0]["topics"] == ["opus-5"]
+        assert [item.id for item in store.query_items(limit=10)] == ["x:1"]
+
+    def test_untag_never_demotes_account_collected_item(self, store):
+        self._record(store, "1")
+        store.upsert_items([self._item("x:1")], origin="collected")
+        store.tag_tweet_topics(["1"], "gpt-5.6")
+
+        store.untag_tweet_topics(["1"], "gpt-5.6")
+        assert [item.id for item in store.query_items(limit=10)] == ["x:1"]
+
     @staticmethod
     def _item(item_id: str):
         from sourcepilot.contracts import Item, Source, SourceType, TimeBasis

@@ -394,6 +394,39 @@ class Store:
                 tagged += 1
         return tagged
 
+    def untag_tweet_topics(self, tweet_ids: Sequence[str], topic: str) -> int:
+        """撤销误打的话题标签；没有其它话题的 topic-only 条目退出信息流。
+
+        推文与 Item 仍作为现查缓存保留，不删除原始事实。若该条也来自账号订阅，
+        origin 已是 collected，不会被降级。
+        """
+        if not tweet_ids:
+            return 0
+        untagged = 0
+        with self._conn() as conn:
+            for tweet_id in tweet_ids:
+                row = conn.execute(
+                    "SELECT topics FROM x_tweets WHERE tweet_id = ?", (tweet_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+                topics = json.loads(row["topics"] or "[]")
+                if topic not in topics:
+                    continue
+                topics = [name for name in topics if name != topic]
+                conn.execute(
+                    "UPDATE x_tweets SET topics = ? WHERE tweet_id = ?",
+                    (json.dumps(topics, ensure_ascii=False), tweet_id),
+                )
+                if not topics:
+                    conn.execute(
+                        "UPDATE items SET origin = 'searched' "
+                        "WHERE id = ? AND origin = 'topic'",
+                        (f"x:{tweet_id}",),
+                    )
+                untagged += 1
+        return untagged
+
     def query_tweets(
         self,
         *,

@@ -690,6 +690,164 @@ class TestAccountsAreCoercedToHandles:
         assert seen == ["OpenAI", "AnthropicAI"], "两种写法都该拿到裸 handle"
 
 
+class TestTopicQualityFilter:
+    """话题搜索词命中不等于内容相关，采集侧只做可解释的确定性校验。"""
+
+    def _topic(self, **over):
+        from sourcepilot.sources.config import ChannelTopic
+
+        base = {
+            "name": "AI热点",
+            "query": "AI release min_faves:50",
+            "min_likes": 50,
+            "focus_terms": ["OpenAI", "Claude", "Grok"],
+            "context_terms": ["发布", "release", "announced"],
+            "focus_window_chars": 600,
+            "max_term_distance": 300,
+            "per_author_limit": 1,
+        }
+        return ChannelTopic(**{**base, **over})
+
+    def _record(self, tweet_id, text, **over):
+        from sourcepilot.channels.x.tweet import TweetRecord
+
+        base = {
+            "tweet_id": tweet_id,
+            "author_handle": f"author{tweet_id}",
+            "text": text,
+            "fetched_at": NOW,
+            "likes": 100,
+        }
+        return TweetRecord(**{**base, **over})
+
+    def test_rejects_keyword_tail_like_the_observed_political_spam(self):
+        from sourcepilot.channels.x.topic_filter import topic_record_matches
+
+        spam = self._record(
+            "1",
+            "Donald Trump political commentary announced " + "x" * 700 + " Grok Nvidia",
+        )
+        assert topic_record_matches(self._topic(), spam) is False
+
+    def test_requires_the_entity_and_action_to_be_near_each_other(self):
+        from sourcepilot.channels.x.topic_filter import topic_record_matches
+
+        unrelated = self._record("1", "OpenAI " + "x" * 400 + " announced")
+        relevant = self._record("2", "OpenAI announced a new model release today")
+        assert topic_record_matches(self._topic(focus_window_chars=1000), unrelated) is False
+        assert topic_record_matches(self._topic(), relevant) is True
+
+    def test_link_only_x_article_uses_preview_title_and_summary(self):
+        from sourcepilot.channels.x.topic_filter import topic_record_matches
+
+        article = self._record(
+            "1",
+            "https://t.co/example",
+            has_article=True,
+            article_title="Anthropic 发布 Claude 新版本",
+            article_summary="今天正式上线，介绍主要能力。",
+        )
+        assert topic_record_matches(self._topic(), article) is True
+
+    def test_low_likes_still_fail_the_local_fallback(self):
+        from sourcepilot.channels.x.topic_filter import topic_record_matches
+
+        record = self._record("1", "OpenAI announced a model", likes=49)
+        assert topic_record_matches(self._topic(), record) is False
+
+    def test_per_author_limit_preserves_upstream_order(self):
+        from sourcepilot.channels.x.topic_filter import limit_topic_authors
+
+        records = [
+            self._record("1", "OpenAI announced one", author_handle="Same"),
+            self._record("2", "OpenAI announced two", author_handle="same"),
+            self._record("3", "Claude release", author_handle="Other"),
+        ]
+        kept = limit_topic_authors(self._topic(), records)
+        assert [record.tweet_id for record in kept] == ["1", "3"]
+
+
+class TestTopicCollectionQualityGate:
+    def test_collection_untags_noise_and_keeps_relevant_article(self, store, monkeypatch):
+        from sourcepilot.channels.x import TWEET_SINK, XRouter, collect_x
+        from sourcepilot.channels.x.tweet import TweetRecord
+        from sourcepilot.contracts import Item, Source
+        from sourcepilot.sources import SourceConfig
+
+        def item(tweet_id, title):
+            return Item(
+                id=f"x:{tweet_id}",
+                source=Source(type=SourceType.X, name="X", platform="x"),
+                title=title,
+                summary=title,
+                url=f"https://x.com/a/status/{tweet_id}",
+                author="a",
+                published_at=NOW,
+                discovered_at=NOW,
+                time_basis=TimeBasis.PUBLISHED,
+                score=0.5,
+            )
+
+        spam = TweetRecord(
+            "spam",
+            "noise",
+            "Politics announced " + "x" * 700 + " Grok",
+            NOW,
+            likes=200,
+            created_at=NOW,
+        )
+        article = TweetRecord(
+            "article",
+            "news",
+            "https://t.co/article",
+            NOW,
+            likes=200,
+            created_at=NOW,
+            has_article=True,
+            article_title="OpenAI announced a new model",
+        )
+        fetched = [item("spam", "noise"), item("article", "news")]
+
+        # 模拟旧规则已经把噪音打过标签；新一轮应撤销并让它退出信息流。
+        store.upsert_items([fetched[0]], origin="topic")
+        store.upsert_tweets([spam])
+        store.tag_tweet_topics(["spam"], "AI热点")
+
+        monkeypatch.setattr(TWEET_SINK, "_store", store)
+        monkeypatch.setattr(
+            XRouter,
+            "search",
+            lambda self, q, n, cursor=None, product="Latest": (
+                fetched,
+                [spam, article],
+                None,
+            ),
+        )
+        monkeypatch.setattr(XRouter, "fill_articles", lambda *args, **kwargs: 0)
+        config = SourceConfig(
+            name="x",
+            display_name="X",
+            type=SourceType.X,
+            channel="x",
+            topics=[{
+                "name": "AI热点",
+                "query": "AI release",
+                "min_likes": 50,
+                "focus_terms": ["OpenAI", "Grok"],
+                "context_terms": ["announced"],
+                "focus_window_chars": 600,
+                "max_term_distance": 300,
+                "per_author_limit": 1,
+            }],
+        )
+
+        collect_x(config)
+
+        assert store.query_tweets(topic="AI热点", limit=10)[0]["tweet_id"] == "article"
+        assert store.query_tweets(handle="noise", limit=10)[0]["topics"] == []
+        assert {value.id for value in store.query_items(limit=10)} == {"x:article"}
+
+
 class TestSummaryIsAlwaysTheFullText:
     """`summary` 恒为完整正文，即使短于 title 的截断长度。
 

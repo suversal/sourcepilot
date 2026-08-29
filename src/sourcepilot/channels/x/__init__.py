@@ -28,6 +28,7 @@ from .accounts import Account, AccountPool
 from .fxtwitter import FxTwitterBackend
 from .graphql import GraphQLBackend
 from .nitter import NitterBackend
+from .topic_filter import limit_topic_authors, topic_record_matches
 from .tweet import TweetRecord
 
 log = logging.getLogger("sourcepilot.channels.x")
@@ -265,16 +266,28 @@ def collect_x(config: SourceConfig) -> list[Item]:
                 # 单个话题失败不拖垮别的话题，更不拖垮账号主线
                 log.warning("X 话题「%s」搜索失败：%s", topic.name, exc.code.value)
                 continue
-            if topic.min_likes > 0:
-                # 采集侧兜底阈值（确定性规则）。query 里的 min_faves: 在上游
-                # 生效，这道闸挡的是上游语法失效（X 改版）后涌进来的裸结果。
-                kept_ids = {
-                    r.tweet_id for r in records if (r.likes or 0) >= topic.min_likes
-                }
-                records = [r for r in records if r.tweet_id in kept_ids]
-                fetched = [
-                    it for it in fetched if it.id.split(":", 1)[-1] in kept_ids
-                ]
+            # X 只保证查询词在整段文本里出现，不保证它们相关。先做点赞和主要
+            # 内容位置校验，再按作者限额保留 X 原排序；全是确定性规则，不引入 LLM。
+            upstream_count = len(records)
+            relevant = [r for r in records if topic_record_matches(topic, r)]
+            relevant_ids = {r.tweet_id for r in relevant}
+            irrelevant_ids = [
+                r.tweet_id for r in records if r.tweet_id not in relevant_ids
+            ]
+            if irrelevant_ids:
+                # 规则收紧后，同一条推文若曾被旧规则误打过标签，要撤销标签；
+                # 原始推文仍保留，只有 topic-only 条目会降级为 searched、退出信息流。
+                TWEET_SINK.store.untag_tweet_topics(irrelevant_ids, topic.name)
+            records = limit_topic_authors(topic, relevant)
+            kept_ids = {r.tweet_id for r in records}
+            fetched = [it for it in fetched if it.id.split(":", 1)[-1] in kept_ids]
+            log.info(
+                "X 话题「%s」质量过滤：上游 %d，相关 %d，作者限额后 %d",
+                topic.name,
+                upstream_count,
+                len(relevant),
+                len(records),
+            )
             if not records:
                 continue
             TWEET_SINK.store.upsert_items(fetched, origin="topic")

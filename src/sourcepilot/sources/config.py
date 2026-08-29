@@ -220,7 +220,9 @@ class ChannelTopic(BaseModel):
 
     1. `query` 直接用 X 搜索语法，`min_faves:`/`lang:` 这类过滤在上游就生效，
        省配额也省得捞回来再丢；
-    2. `min_likes` 是采集侧兜底阈值——上游语法失效（X 改版）时它还在。
+    2. `min_likes` 是采集侧兜底阈值——上游语法失效（X 改版）时它还在；
+    3. `focus_terms` / `context_terms` 校验关键词在正文里的确定性位置关系，
+       挡住「正文无关、末尾堆搜索词」；`per_author_limit` 防单个账号刷屏。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -233,6 +235,37 @@ class ChannelTopic(BaseModel):
     min_likes: int = Field(
         default=0, ge=0, description="采集侧确定性阈值：点赞数低于此值的丢弃（0 = 不过滤）"
     )
+    focus_terms: list[str] = Field(
+        default_factory=list,
+        description=(
+            "核心主题词；至少一个必须出现在文章标题/摘要或推文开头窗口。"
+            "空列表表示不启用内容位置过滤"
+        ),
+    )
+    context_terms: list[str] = Field(
+        default_factory=list,
+        description=(
+            "与核心词共同出现的上下文词（如发布动作）；只在 focus_terms 启用时使用"
+        ),
+    )
+    focus_window_chars: int = Field(
+        default=600,
+        ge=0,
+        le=5000,
+        description="只检查推文正文前多少字符；0 = 检查全文。文章标题/摘要始终完整检查",
+    )
+    max_term_distance: int | None = Field(
+        default=None,
+        ge=0,
+        le=2000,
+        description="核心词与上下文词的最大字符间隔；None = 只要求在同一内容段",
+    )
+    per_author_limit: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        description="单轮同一作者最多保留几条；0 = 不限制",
+    )
     sort: Literal["top", "latest"] = Field(
         default="top",
         description=(
@@ -240,6 +273,14 @@ class ChannelTopic(BaseModel):
             "latest = 按时间倒序（只在想要实时流水时用）"
         ),
     )
+
+    @model_validator(mode="after")
+    def _check_quality_filter(self) -> ChannelTopic:
+        if self.context_terms and not self.focus_terms:
+            raise ValueError("context_terms 必须配合 focus_terms")
+        if self.max_term_distance is not None and not self.context_terms:
+            raise ValueError("max_term_distance 必须配合 context_terms")
+        return self
 
 
 class SourceConfig(BaseModel):
