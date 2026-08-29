@@ -202,4 +202,4 @@ P2 = 体验问题**。
 | `0621324` | `AI 热点` 去掉中间空格，配置与正式库 20 条历史标签统一迁为 `AI热点`；`U卡推荐` / `eSIM推荐` 不变 |
 | `68834c3` | 三个话题统一使用 Latest、`min_faves:50`、`min_likes:50` 并过滤回复/转推；收紧 AI 品牌词及 U卡/eSIM 实测类关键词，减少歧义和旧数据占位 |
 | `0264b72` | X 话题支持可选的主要内容窗口、词距和同作者单轮限额，仅 `AI热点` 启用；U卡/eSIM 取消二次筛选并从备份恢复全部历史标签；误打标签可撤销，topic-only Item 安全降级为 searched；补 GreenVPS 的 Docker 镜像与 loopback-only Compose 部署，运行库和凭据只挂载、不进入镜像 |
-| 2026-08-29 GreenVPS | `/home/sue/sourcepilot` 首次上线：容器 `healthy`、`restart=unless-stopped`，宿主机仅监听 `127.0.0.1:8420`；51 MB 正式库传输前后 SHA-256 一致且 SQLite 完整性为 `ok`，服务器保留首次启动前回滚副本。VPS 真实调用 X `SearchTimeline` 返回 200，现场搜索 `mode=live`、`stale=false`、813ms。整体 `/api/v1/health` 仍为 false 是继承的 `pcbeta` / `wechat` down 与 `linuxdo` degraded，并非容器或 X 故障。 |
+| 2026-08-29 GreenVPS | `/home/sue/sourcepilot` 首次上线：容器 `healthy`、`restart=unless-stopped`，宿主机仅监听 `127.0.0.1:8420`；51 MB 正式库传输前后 SHA-256 一致且 SQLite 完整性为 `ok`，服务器保留首次启动前回滚副本。VPS 现场搜索 `mode=live`、`stale=false`、813ms；首个后台 X 整轮的 22 次 `UserByScreenName`、22 次 `UserTweets`、3 次 `SearchTimeline` 全部 200，0 次 429、0 条 ERROR，三个话题的 `collected_at` 均更新到本轮。整体 `/api/v1/health` 仍为 false 是继承的 `pcbeta` / `wechat` down 与 `linuxdo` degraded，并非容器或 X 故障。 |
